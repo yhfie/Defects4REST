@@ -540,43 +540,47 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         clean(heading=False)
 
     # Remove existing repo
-    if os.path.isdir(project_dir_abs):
-        pretty_subsection("Removing existing Dolibarr repository …")
-        pretty_step(f"Deleting '{project_dir_abs}' …")
-        shutil.rmtree(project_dir_abs)
+    if os.path.isdir(project_dir_abs) and os.path.exists(f"{project_dir_abs}/.git"):
+        # pretty_subsection("Removing existing Dolibarr repository …")
+        # pretty_step(f"Deleting '{project_dir_abs}' …")
+        # shutil.rmtree(project_dir_abs)
+        pretty_step(f"repo exists at {project_dir_abs}. Checking out …")
+        os.chdir(project_dir_abs)
+        run(["git", "fetch", "--all", "--tags"])
+        run(["git", "checkout", sha])
+    else:
+        # Ensure parent directory exists
+        os.makedirs(parent_dir, exist_ok=True)
 
-    # Ensure parent directory exists
-    os.makedirs(parent_dir, exist_ok=True)
+        # Clone repository
+        pretty_subsection("Cloning Dolibarr repository …")
+        pretty_step(f"Cloning into '{project_dir_abs}' …")
+        run(["git", "clone", REPO_URL, project_dir_abs], cwd=parent_dir)
 
-    # Clone repository
-    pretty_subsection("Cloning Dolibarr repository …")
-    pretty_step(f"Cloning into '{project_dir_abs}' …")
-    run(["git", "clone", REPO_URL, project_dir_abs], cwd=parent_dir)
+        # Change to project directory for all subsequent operations
+        os.chdir(PROJECT_DIR)
 
-    # Change to project directory for all subsequent operations
-    os.chdir(PROJECT_DIR)
-
-    try:
-        pretty_subsection("Checking out specific SHA …")
-        if sha:
-            if sha == "latest":
-                # Pull latest from default branch
-                print("Pulling latest default branch …")
-                run(["git", "fetch", "--all"])
-                default_branch = get_default_branch()
-                print(f"Using default branch: {default_branch}")
-                run(["git", "checkout", default_branch])
-                run(["git", "pull", "origin", default_branch])
-            else:
-                # Check out specific commit
-                if not sha_exists(sha):
-                    print(f"SHA {sha} not found locally; fetching …")
-                    run(["git", "fetch", "--all", "--tags"])
-                print(f"Checking out SHA: {sha}")
-                run(["git", "checkout", sha])
-    except subprocess.CalledProcessError as e:
-        print(f"Checkout failed: {e}", file=sys.stderr)
-        sys.exit(1)
+        try:
+            pretty_subsection("Checking out specific SHA …")
+            if sha:
+                if sha == "latest":
+                    # Pull latest from default branch
+                    print("Pulling latest default branch …")
+                    run(["git", "fetch", "--all"])
+                    default_branch = get_default_branch()
+                    print(f"Using default branch: {default_branch}")
+                    run(["git", "checkout", default_branch])
+                    run(["git", "pull", "origin", default_branch])
+                else:
+                    # Check out specific commit
+                    if not sha_exists(sha):
+                        print(f"SHA {sha} not found locally; fetching …")
+                        run(["git", "fetch", "--all", "--tags"])
+                    print(f"Checking out SHA: {sha}")
+                    run(["git", "checkout", sha])
+        except subprocess.CalledProcessError as e:
+            print(f"Checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"dolibarr repository cloned and checked out at: {project_dir_abs}")

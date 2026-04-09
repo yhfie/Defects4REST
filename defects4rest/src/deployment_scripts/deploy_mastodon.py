@@ -1,4 +1,4 @@
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Copyright (c) 2026 Rahil Piyush Mehta, Kausar Y. Moshood, Huwaida Rahman Yafie and Manish Motwani
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -17,18 +17,33 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
-import subprocess
-import shutil
 import os
+import shutil
+import subprocess
 import sys
+
 import requests
-from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
-from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
-from defects4rest.src.utils.issue_metadata import run_issue_hook, _load_bug_row ,resolve_docker_version_for_sha
-from defects4rest.src.utils.git import sha_exists, get_default_branch
+
 from defects4rest.src.api_dep_setup import mastodon as mastodon_isuue
+from defects4rest.src.utils.git import get_default_branch, sha_exists
+from defects4rest.src.utils.issue_metadata import (
+    _load_bug_row,
+    resolve_docker_version_for_sha,
+    run_issue_hook,
+)
+from defects4rest.src.utils.resources import (
+    check_prereq,
+    data_csv,
+    ensure_temp_project_dir,
+)
+from defects4rest.src.utils.shell import (
+    pretty_section,
+    pretty_step,
+    pretty_subsection,
+    run,
+)
 
 # Default Mastodon repo
 PROJECT_NAME = "mastodon"
@@ -40,17 +55,16 @@ ENV_TARGET = ".env.production"
 PATCHED_SHAS = {
     "e964cdcec3fb17351b4b5c93e96662da2b2d249b": "https://github.com/ClearlyClaire/mastodon.git",
     "adf76a6aa357720348f51aa8d2c06dcd6469a728": "https://github.com/ClearlyClaire/mastodon.git",
-
     # Add more patched SHAs here
 }
 
 
 def mastodon_oauth_flow(
-        base_url="http://localhost:3000",
-        admin_email="admin@localhost",
-        admin_password="add11dc7cd2870781b7110e89657002b",
-        client_name="Test Client",
-        retry_with_existing_app=True
+    base_url="http://localhost:3000",
+    admin_email="admin@localhost",
+    admin_password="add11dc7cd2870781b7110e89657002b",
+    client_name="Test Client",
+    retry_with_existing_app=True,
 ):
     """
     Complete Mastodon OAuth flow - returns credentials needed for API testing.
@@ -89,8 +103,8 @@ def mastodon_oauth_flow(
                 "client_name": client_name,
                 "redirect_uris": "urn:ietf:wg:oauth:2.0:oob",
                 "scopes": "read write follow",
-                "website": "https://example.com"
-            }
+                "website": "https://example.com",
+            },
         )
 
         if app_response.status_code != 200:
@@ -101,15 +115,15 @@ def mastodon_oauth_flow(
             )
 
         app_data = app_response.json()
-        client_id = app_data['client_id']
-        client_secret = app_data['client_secret']
+        client_id = app_data["client_id"]
+        client_secret = app_data["client_secret"]
 
         pretty_step(f"OAuth App Registered")
         pretty_step(f"Client ID: {client_id}")
         pretty_step(f"Client Secret: {client_secret}")
 
     except Exception as e:
-        pretty_step(f"Failed to register app: {e}","red")
+        pretty_step(f"Failed to register app: {e}", "red")
         raise
 
     # Step 2: Get Access Token using Password Grant
@@ -118,7 +132,7 @@ def mastodon_oauth_flow(
     # Try different username formats
     username_attempts = [
         ("email format", admin_email),
-        ("username only", admin_email.split('@')[0]),
+        ("username only", admin_email.split("@")[0]),
     ]
 
     token_data = None
@@ -136,8 +150,8 @@ def mastodon_oauth_flow(
                     "grant_type": "password",
                     "username": username,
                     "password": admin_password,
-                    "scope": "read write follow"
-                }
+                    "scope": "read write follow",
+                },
             )
 
             if token_response.status_code == 200:
@@ -146,11 +160,14 @@ def mastodon_oauth_flow(
                 break
             else:
                 last_error = token_response.json()
-                pretty_step(f"Failed with {attempt_name}: {last_error.get('error', 'unknown')}",color="red")
+                pretty_step(
+                    f"Failed with {attempt_name}: {last_error.get('error', 'unknown')}",
+                    color="red",
+                )
 
         except Exception as e:
             last_error = str(e)
-            pretty_step(f"Exception with {attempt_name}: {e}",color="red")
+            pretty_step(f"Exception with {attempt_name}: {e}", color="red")
 
     # If password grant failed, provide manual instructions
     if not token_data:
@@ -177,7 +194,8 @@ puts "ACCESS_TOKEN: #{{token.token}}"
         print("\nOption 2: Use Web Browser")
         print("-" * 60)
         print(
-            f"1. Open: {base_url}/oauth/authorize?client_id={client_id}&scope=read+write+follow&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code")
+            f"1. Open: {base_url}/oauth/authorize?client_id={client_id}&scope=read+write+follow&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code"
+        )
         print(f"2. Login with email: {admin_email}")
         print(f"3. Click 'Authorize'")
         print(f"4. Copy the authorization code")
@@ -190,22 +208,20 @@ puts "ACCESS_TOKEN: #{{token.token}}"
   -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"
 """)
 
-        raise Exception(
-            f"Failed to get access token. Last error: {last_error}"
-        )
+        raise Exception(f"Failed to get access token. Last error: {last_error}")
 
-    access_token = token_data['access_token']
+    access_token = token_data["access_token"]
 
     pretty_step(f"Access Token Obtained")
     pretty_step(f"   Token: {access_token}")
 
     credentials = {
-        'client_id': client_id,
-        'client_secret': client_secret,
-        'access_token': access_token,
-        'token_type': token_data.get('token_type', 'Bearer'),
-        'scope': token_data.get('scope', 'read write follow'),
-        'created_at': token_data.get('created_at')
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "access_token": access_token,
+        "token_type": token_data.get("token_type", "Bearer"),
+        "scope": token_data.get("scope", "read write follow"),
+        "created_at": token_data.get("created_at"),
     }
 
     print("\n" + "=" * 60)
@@ -214,12 +230,15 @@ puts "ACCESS_TOKEN: #{{token.token}}"
 
     return credentials
 
+
 def main(sha=None, issue_id=None, action: str = "deploy"):
     # Ensure required tools
     if action == "deploy":
         pretty_section(f"Deploying Mastodon (issue number {issue_id}) at SHA: {sha}")
     else:
-        pretty_section(f"Cloning and checkout Mastodon (issue number {issue_id}) at SHA: {sha}")
+        pretty_section(
+            f"Cloning and checkout Mastodon (issue number {issue_id}) at SHA: {sha}"
+        )
 
     for tool in ("git", "docker", "docker-compose"):
         check_prereq(tool)
@@ -233,79 +252,97 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     # if not os.path.isdir(PROJECT_DIR):
     #     print(f"[INFO] Cloning Mastodon into '{PROJECT_DIR}' …")
     #     run(["git", "clone", repo_url, PROJECT_DIR])
-    if os.path.isdir(PROJECT_DIR):
-        print(f"[INFO] Deleting existing folder: {PROJECT_DIR}")
-        shutil.rmtree(PROJECT_DIR)
-
-    print(f"[INFO] Cloning Mastodon into '{PROJECT_DIR}' …")
-    run(["git", "clone", repo_url, PROJECT_DIR])
-    os.chdir(PROJECT_DIR)
-    print("[INFO] Resetting local changes from previous deployments …")
-    try:
-        run(["git", "reset", "--hard"])
-        run(["git", "clean", "-fd"])
-    except subprocess.CalledProcessError as e:
-        print(f"[WARN] Could not reset local changes: {e}")
-
-    # Add fork remote if SHA is patched
-    if sha in PATCHED_SHAS:
-        fork_url = PATCHED_SHAS[sha]
+    if os.path.isdir(PROJECT_DIR) and os.path.exists(f"{PROJECT_DIR}/.git"):
+        # print(f"[INFO] Deleting existing folder: {PROJECT_DIR}")
+        # shutil.rmtree(PROJECT_DIR)
+        pretty_step(f"repo exists at {PROJECT_DIR}. Checking out …")
+        os.chdir(PROJECT_DIR)
+        run(["git", "fetch", "--all", "--tags"])
+        run(["git", "checkout", sha])
+    else:
+        print(f"[INFO] Cloning Mastodon into '{PROJECT_DIR}' …")
+        run(["git", "clone", repo_url, PROJECT_DIR])
+        os.chdir(PROJECT_DIR)
+        print("[INFO] Resetting local changes from previous deployments …")
         try:
-            run(["git", "remote", "add", "patched_fork", fork_url])
-            print(f"[INFO] Added remote 'patched_fork' -> {fork_url}")
-        except subprocess.CalledProcessError:
-            # Remote probably already exists, safe to ignore
-            print(f"[INFO] Remote 'patched_fork' already exists")
-
-    # Fetch all branches and tags
-    print("[INFO] Fetching all remotes …")
-    run(["git", "fetch", "--all", "--tags"])
-
-    # Reset any local changes from previous deployments
-
-
-    # Check SHA existence
-    # Check SHA existence (with better fallback logic)
-    if sha and sha != "latest" and not sha_exists(sha):
-        # 1) First try fetching the SHA directly (works for dangling commits if server allows it)
-        primary_remote = "patched_fork" if sha in PATCHED_SHAS else "origin"
-        print(f"[INFO] SHA {sha} not found locally. Trying direct fetch from {primary_remote} …")
-        try:
-            run(["git", "fetch", primary_remote, sha])
+            run(["git", "reset", "--hard"])
+            run(["git", "clean", "-fd"])
         except subprocess.CalledProcessError as e:
-            print(f"[WARN] Direct fetch from {primary_remote} failed: {e}")
+            print(f"[WARN] Could not reset local changes: {e}")
 
-        # 2) If still missing and it's a patched SHA, then fetch all branches from fork (your existing behavior)
-        if not sha_exists(sha) and sha in PATCHED_SHAS:
-            print(f"[INFO] SHA {sha} still missing. Fetching all branches from patched fork …")
-            run(["git", "fetch", "patched_fork", "+refs/heads/*:refs/remotes/patched_fork/*"])
-            # (optional) also fetch tags from fork
-            run(["git", "fetch", "patched_fork", "--tags"])
+        # Add fork remote if SHA is patched
+        if sha in PATCHED_SHAS:
+            fork_url = PATCHED_SHAS[sha]
+            try:
+                run(["git", "remote", "add", "patched_fork", fork_url])
+                print(f"[INFO] Added remote 'patched_fork' -> {fork_url}")
+            except subprocess.CalledProcessError:
+                # Remote probably already exists, safe to ignore
+                print(f"[INFO] Remote 'patched_fork' already exists")
 
-        # 3) Final check
-        if not sha_exists(sha):
-            print(f"[ERROR] SHA {sha} still not found after all fetch attempts. Aborting.")
-            print("[HINT] The SHA may not exist in this fork, or GitHub may not serve it unless reachable from a ref.")
-            sys.exit(1)
+        # Fetch all branches and tags
+        print("[INFO] Fetching all remotes …")
+        run(["git", "fetch", "--all", "--tags"])
 
-    # Checkout SHA or branch
-    try:
-        if sha:
-            if sha == "latest":
-                default_branch = get_default_branch()
-                pretty_step(f"Checking out latest default branch: {default_branch}")
-                run(["git", "checkout", default_branch])
-                run(["git", "pull", "origin", default_branch])
+        # Reset any local changes from previous deployments
+
+        # Check SHA existence
+        # Check SHA existence (with better fallback logic)
+        if sha and sha != "latest" and not sha_exists(sha):
+            # 1) First try fetching the SHA directly (works for dangling commits if server allows it)
+            primary_remote = "patched_fork" if sha in PATCHED_SHAS else "origin"
+            print(
+                f"[INFO] SHA {sha} not found locally. Trying direct fetch from {primary_remote} …"
+            )
+            try:
+                run(["git", "fetch", primary_remote, sha])
+            except subprocess.CalledProcessError as e:
+                print(f"[WARN] Direct fetch from {primary_remote} failed: {e}")
+
+            # 2) If still missing and it's a patched SHA, then fetch all branches from fork (your existing behavior)
+            if not sha_exists(sha) and sha in PATCHED_SHAS:
+                print(
+                    f"[INFO] SHA {sha} still missing. Fetching all branches from patched fork …"
+                )
+                run(
+                    [
+                        "git",
+                        "fetch",
+                        "patched_fork",
+                        "+refs/heads/*:refs/remotes/patched_fork/*",
+                    ]
+                )
+                # (optional) also fetch tags from fork
+                run(["git", "fetch", "patched_fork", "--tags"])
+
+            # 3) Final check
+            if not sha_exists(sha):
+                print(
+                    f"[ERROR] SHA {sha} still not found after all fetch attempts. Aborting."
+                )
+                print(
+                    "[HINT] The SHA may not exist in this fork, or GitHub may not serve it unless reachable from a ref."
+                )
+                sys.exit(1)
+
+        # Checkout SHA or branch
+        try:
+            if sha:
+                if sha == "latest":
+                    default_branch = get_default_branch()
+                    pretty_step(f"Checking out latest default branch: {default_branch}")
+                    run(["git", "checkout", default_branch])
+                    run(["git", "pull", "origin", default_branch])
+                else:
+                    pretty_step(f"Checking out SHA: {sha}")
+                    run(["git", "checkout", sha])
             else:
-                pretty_step(f"Checking out SHA: {sha}")
-                run(["git", "checkout", sha])
-        else:
-            pretty_step("No SHA provided. Pulling latest 'main' branch …")
-            run(["git", "checkout", "main"])
-            run(["git", "pull", "origin", "main"])
-    except subprocess.CalledProcessError as e:
-        print(f"[ERROR] Checkout failed: {e}", file=sys.stderr)
-        sys.exit(1)
+                pretty_step("No SHA provided. Pulling latest 'main' branch …")
+                run(["git", "checkout", "main"])
+                run(["git", "pull", "origin", "main"])
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"mastodon repository cloned and checked out at: {PROJECT_DIR}")
@@ -322,10 +359,12 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         with open(ENV_TARGET, "r") as f:
             for line in f:
                 line_stripped = line.strip()
-                if not line_stripped.startswith("LOCAL_DOMAIN=") and \
-                   not line_stripped.startswith("DB_HOST=") and \
-                   not line_stripped.startswith("REDIS_HOST=") and \
-                   not line_stripped.startswith("LOCAL_HTTPS="):
+                if (
+                    not line_stripped.startswith("LOCAL_DOMAIN=")
+                    and not line_stripped.startswith("DB_HOST=")
+                    and not line_stripped.startswith("REDIS_HOST=")
+                    and not line_stripped.startswith("LOCAL_HTTPS=")
+                ):
                     lines.append(line.rstrip())
         lines.append("LOCAL_DOMAIN=localhost")
         lines.append("DB_HOST=db")
@@ -333,7 +372,9 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         lines.append("LOCAL_HTTPS=false")
         with open(ENV_TARGET, "w") as f:
             f.write("\n".join(lines) + "\n")
-        pretty_step(f" Set LOCAL_DOMAIN=localhost, DB_HOST=db, REDIS_HOST=redis, LOCAL_HTTPS=false in {ENV_TARGET}")
+        pretty_step(
+            f" Set LOCAL_DOMAIN=localhost, DB_HOST=db, REDIS_HOST=redis, LOCAL_HTTPS=false in {ENV_TARGET}"
+        )
 
     # Generate SECRET_KEY_BASE and OTP_SECRET if not present
     pretty_step("Checking for required secrets …")
@@ -347,15 +388,15 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     has_valid_otp = False
 
     # Check if secrets exist and are not empty
-    for line in env_content.split('\n'):
+    for line in env_content.split("\n"):
         line = line.strip()
-        if line.startswith("SECRET_KEY_BASE=") and len(line.split('=', 1)) > 1:
-            secret_value = line.split('=', 1)[1].strip()
-            if secret_value and not secret_value.startswith('#'):
+        if line.startswith("SECRET_KEY_BASE=") and len(line.split("=", 1)) > 1:
+            secret_value = line.split("=", 1)[1].strip()
+            if secret_value and not secret_value.startswith("#"):
                 has_valid_secret_key = True
-        if line.startswith("OTP_SECRET=") and len(line.split('=', 1)) > 1:
-            otp_value = line.split('=', 1)[1].strip()
-            if otp_value and not otp_value.startswith('#'):
+        if line.startswith("OTP_SECRET=") and len(line.split("=", 1)) > 1:
+            otp_value = line.split("=", 1)[1].strip()
+            if otp_value and not otp_value.startswith("#"):
                 has_valid_otp = True
 
     if not has_valid_secret_key:
@@ -372,7 +413,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         def generate_secret(length=128):
             """Generate a cryptographically secure random secret"""
             alphabet = string.ascii_letters + string.digits
-            return ''.join(secrets_module.choice(alphabet) for _ in range(length))
+            return "".join(secrets_module.choice(alphabet) for _ in range(length))
 
         secret_key_base = generate_secret(128) if not has_valid_secret_key else None
         otp_secret = generate_secret(128) if not has_valid_otp else None
@@ -408,21 +449,23 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     if os.path.exists(ENV_TARGET):
         with open(ENV_TARGET, "r") as f:
             content = f.read()
-            if "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY=" not in content or \
-                    "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY=" not in content or \
-                    "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT=" not in content:
+            if (
+                "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY=" not in content
+                or "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY=" not in content
+                or "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT=" not in content
+            ):
                 needs_encryption_keys = True
 
     if needs_encryption_keys:
         pretty_step("Generating ActiveRecord encryption keys …")
         # Generate encryption keys using Python
-        import secrets as secrets_module
         import base64
+        import secrets as secrets_module
 
         def generate_encryption_key():
             """Generate a base64 encoded 32-byte key"""
             key_bytes = secrets_module.token_bytes(32)
-            return base64.b64encode(key_bytes).decode('utf-8')
+            return base64.b64encode(key_bytes).decode("utf-8")
 
         primary_key = generate_encryption_key()
         deterministic_key = generate_encryption_key()
@@ -432,7 +475,9 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
             f.write("\n# ActiveRecord Encryption Keys\n")
             f.write(f"ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY={primary_key}\n")
             f.write(f"ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY={deterministic_key}\n")
-            f.write(f"ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT={key_derivation_salt}\n")
+            f.write(
+                f"ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT={key_derivation_salt}\n"
+            )
         pretty_step(f"pretty_stepAdded encryption keys to {ENV_TARGET}")
 
     # Fix Gemfile.lock for json-canonicalization compatibility
@@ -441,13 +486,19 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         pretty_step("Fixing Gemfile.lock for json-canonicalization compatibility …")
         try:
             subprocess.run(
-                ["sed", "-i", "", "s/json-canonicalization (0.3.2)/json-canonicalization (1.0.0)/", gemfile_lock],
+                [
+                    "sed",
+                    "-i",
+                    "",
+                    "s/json-canonicalization (0.3.2)/json-canonicalization (1.0.0)/",
+                    gemfile_lock,
+                ],
                 check=True,
-                cwd=PROJECT_DIR
+                cwd=PROJECT_DIR,
             )
             pretty_step("Updated json-canonicalization version in Gemfile.lock")
         except subprocess.CalledProcessError as e:
-            pretty_step(f"Failed to update Gemfile.lock: {e}",color="red")
+            pretty_step(f"Failed to update Gemfile.lock: {e}", color="red")
 
     # Disable eager loading and force_ssl for local development
     prod_config = "config/environments/production.rb"
@@ -455,14 +506,26 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         pretty_step("[INFO] Configuring production environment for local development …")
         try:
             subprocess.run(
-                ["sed", "-i", "", "s/config.eager_load = true/config.eager_load = false/", prod_config],
+                [
+                    "sed",
+                    "-i",
+                    "",
+                    "s/config.eager_load = true/config.eager_load = false/",
+                    prod_config,
+                ],
                 check=True,
-                cwd=PROJECT_DIR
+                cwd=PROJECT_DIR,
             )
             subprocess.run(
-                ["sed", "-i", "", "s/config.force_ssl = true/config.force_ssl = false/", prod_config],
+                [
+                    "sed",
+                    "-i",
+                    "",
+                    "s/config.force_ssl = true/config.force_ssl = false/",
+                    prod_config,
+                ],
                 check=True,
-                cwd=PROJECT_DIR
+                cwd=PROJECT_DIR,
             )
             print("[INFO] Disabled eager loading and force_ssl")
         except subprocess.CalledProcessError as e:
@@ -474,6 +537,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     # Wait for database to be ready
     pretty_step("Waiting for database to be ready …")
     import time
+
     time.sleep(10)
 
     # Create database user and database directly with psql
@@ -482,28 +546,48 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     try:
         # Create user
         subprocess.run(
-            ["docker-compose", "exec", "-T", "db", "psql", "-U", "postgres", "-c",
-             "CREATE USER mastodon CREATEDB;"],
+            [
+                "docker-compose",
+                "exec",
+                "-T",
+                "db",
+                "psql",
+                "-U",
+                "postgres",
+                "-c",
+                "CREATE USER mastodon CREATEDB;",
+            ],
             cwd=PROJECT_DIR,
             capture_output=True,
-            check=False  # Ignore if user already exists
+            check=False,  # Ignore if user already exists
         )
 
         # Create database
         result = subprocess.run(
-            ["docker-compose", "exec", "-T", "db", "psql", "-U", "postgres", "-c",
-             "CREATE DATABASE mastodon_production OWNER mastodon;"],
+            [
+                "docker-compose",
+                "exec",
+                "-T",
+                "db",
+                "psql",
+                "-U",
+                "postgres",
+                "-c",
+                "CREATE DATABASE mastodon_production OWNER mastodon;",
+            ],
             cwd=PROJECT_DIR,
             capture_output=True,
             text=True,
-            check=False  # Ignore if already exists
+            check=False,  # Ignore if already exists
         )
 
         if result.returncode == 0 or "already exists" in result.stderr:
             db_created = True
             pretty_step("Database created or already exists")
         else:
-            pretty_step(f"Database creation output: {result.stderr if result.stderr else 'OK'}")
+            pretty_step(
+                f"Database creation output: {result.stderr if result.stderr else 'OK'}"
+            )
             db_created = True  # Assume it exists if no error
     except subprocess.CalledProcessError as e:
         pretty_step(f"Database setup warning: {e}")
@@ -514,16 +598,27 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     tables_exist = False
     try:
         result = subprocess.run(
-            ["docker-compose", "exec", "-T", "db", "psql", "-U", "mastodon", "-d", "mastodon_production", "-c",
-             "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public';"],
+            [
+                "docker-compose",
+                "exec",
+                "-T",
+                "db",
+                "psql",
+                "-U",
+                "mastodon",
+                "-d",
+                "mastodon_production",
+                "-c",
+                "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public';",
+            ],
             cwd=PROJECT_DIR,
             capture_output=True,
             text=True,
-            check=False
+            check=False,
         )
         if result.returncode == 0 and result.stdout:
             # Check if we have more than 0 tables
-            tables_exist = "0" not in result.stdout or result.stdout.count('\n') > 3
+            tables_exist = "0" not in result.stdout or result.stdout.count("\n") > 3
     except:
         pass
 
@@ -535,29 +630,51 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
             # Use db:schema:load for fresh databases, db:migrate for existing ones
             task = "db:migrate" if tables_exist else "db:schema:load"
             result = subprocess.run(
-                ["docker-compose", "run", "--rm", "web", "bundle", "exec", "rake", task],
+                [
+                    "docker-compose",
+                    "run",
+                    "--rm",
+                    "web",
+                    "bundle",
+                    "exec",
+                    "rake",
+                    task,
+                ],
                 cwd=PROJECT_DIR,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             pretty_step(f"[INFO] Database migrations complete (used {task})")
             migration_success = True
         except subprocess.CalledProcessError as e:
-            pretty_step(f"[WARN] Database migration failed with exit code {e.returncode}")
+            pretty_step(
+                f"[WARN] Database migration failed with exit code {e.returncode}"
+            )
             if e.stderr:
                 print(f"[ERROR] {e.stderr[:500]}")
             pretty_step("[INFO] You may need to run manually:")
-            pretty_step("       docker-compose run --rm web bundle exec rake db:schema:load")
+            pretty_step(
+                "       docker-compose run --rm web bundle exec rake db:schema:load"
+            )
 
     # Run database seed (only if migrations succeeded)
     if migration_success:
         pretty_step("[INFO] Seeding database …")
         try:
             subprocess.run(
-                ["docker-compose", "run", "--rm", "web", "bundle", "exec", "rake", "db:seed"],
+                [
+                    "docker-compose",
+                    "run",
+                    "--rm",
+                    "web",
+                    "bundle",
+                    "exec",
+                    "rake",
+                    "db:seed",
+                ],
                 cwd=PROJECT_DIR,
-                check=False  # Don't fail if seed has issues
+                check=False,  # Don't fail if seed has issues
             )
             print("[INFO] Database setup complete")
         except subprocess.CalledProcessError as e:
@@ -572,15 +689,28 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
 
         # Try to create account first
         result = subprocess.run(
-            ["docker-compose", "run", "--rm", "web", "bin/tootctl", "accounts", "create",
-             admin_username, "--email", admin_email, "--confirmed", "--role", "Owner"],
+            [
+                "docker-compose",
+                "run",
+                "--rm",
+                "web",
+                "bin/tootctl",
+                "accounts",
+                "create",
+                admin_username,
+                "--email",
+                admin_email,
+                "--confirmed",
+                "--role",
+                "Owner",
+            ],
             capture_output=True,
             text=True,
-            cwd=PROJECT_DIR
+            cwd=PROJECT_DIR,
         )
 
         # Extract password from output
-        for line in result.stdout.split('\n'):
+        for line in result.stdout.split("\n"):
             if "New password:" in line:
                 password = line.split("New password:")[-1].strip()
                 break
@@ -589,16 +719,27 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         if not password:
             output = result.stdout + result.stderr
             if "taken" in output or result.returncode != 0:
-                print(f"[INFO] Admin account '{admin_username}' already exists. Resetting password …")
+                print(
+                    f"[INFO] Admin account '{admin_username}' already exists. Resetting password …"
+                )
                 reset_result = subprocess.run(
-                    ["docker-compose", "run", "--rm", "web", "bin/tootctl", "accounts", "modify",
-                     admin_username, "--reset-password"],
+                    [
+                        "docker-compose",
+                        "run",
+                        "--rm",
+                        "web",
+                        "bin/tootctl",
+                        "accounts",
+                        "modify",
+                        admin_username,
+                        "--reset-password",
+                    ],
                     capture_output=True,
                     text=True,
-                    cwd=PROJECT_DIR
+                    cwd=PROJECT_DIR,
                 )
                 # Extract password from reset output
-                for line in reset_result.stdout.split('\n'):
+                for line in reset_result.stdout.split("\n"):
                     if "New password:" in line:
                         password = line.split("New password:")[-1].strip()
                         break
@@ -606,7 +747,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
             "issue_id": issue_id,
             "project": "nocodb",
             "extra_flag": True,
-            "port": "http://localhost:3000"
+            "port": "http://localhost:3000",
         }
 
         mastodon_oauth_flow(admin_email=admin_email, admin_password=password)
@@ -616,32 +757,37 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
 
         # Display credentials
         if password:
-            print("\n" + "="*60)
+            print("\n" + "=" * 60)
             print("MASTODON IS READY!")
-            print("="*60)
+            print("=" * 60)
             print(f"URL:      http://localhost:3000")
             print(f"Username: {admin_username}")
             print(f"Password: {password}")
             print(f"Email:    {admin_email}")
             print(f"Role:     Owner (Admin)")
-            print("="*60 + "\n")
+            print("=" * 60 + "\n")
         else:
             print(f"[WARN] Could not retrieve admin password.")
             print(f"[INFO] Reset password manually with:")
-            print(f"       docker-compose run --rm web bin/tootctl accounts modify {admin_username} --reset-password")
+            print(
+                f"       docker-compose run --rm web bin/tootctl accounts modify {admin_username} --reset-password"
+            )
     else:
         print("[WARN] Skipping admin account creation due to migration failure")
         print("[INFO] Fix the database issues and run:")
-        print("       docker-compose run --rm web bin/tootctl accounts create testadmin --email admin@localhost --confirmed --role Owner")
+        print(
+            "       docker-compose run --rm web bin/tootctl accounts create testadmin --email admin@localhost --confirmed --role Owner"
+        )
 
     pretty_step("[INFO] Mastodon is up and running at http://localhost:3000")
 
-    base_url = "http://localhost:3000",
-    admin_email = "admin@localhost",
-    admin_password = "add11dc7cd2870781b7110e89657002b",
-    client_name = "Test Client",
+    base_url = ("http://localhost:3000",)
+    admin_email = ("admin@localhost",)
+    admin_password = ("add11dc7cd2870781b7110e89657002b",)
+    client_name = ("Test Client",)
 
-    mastodon_oauth_flow(admin_email=admin_email,admin_password=password )
+    mastodon_oauth_flow(admin_email=admin_email, admin_password=password)
+
 
 def stop():
     print("[INFO] Stopping Mastodon containers …")
