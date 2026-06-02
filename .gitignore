@@ -5,3 +5,5 @@
 /build
 /defects4REST.egg-info
 /.idea
+Defects4REST/**/.git
+/defects4rest/data/temp_project_data

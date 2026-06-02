@@ -41,6 +41,7 @@ import argparse
 
 from defects4rest.src.utils.resources import ensure_temp_project_dir, get_defects4rest_root, check_prereq 
 from defects4rest.src.utils.shell import pretty_step, pretty_section
+from defects4rest.src.utils.git import git_healthy
 
 # ---------------------------------------------------------------------
 # Configuration
@@ -431,33 +432,59 @@ def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
     # 2) Ensure DOCKER_ROOT exists
     os.makedirs(DOCKER_ROOT, exist_ok=True)
 
-    # 3) Fresh clone every time to avoid local-change conflicts
-    if os.path.isdir(REPO_DIR):
-        pretty_step(f"Removing existing repo at {REPO_DIR} for a clean checkout...")
-        shutil.rmtree(REPO_DIR)
+    # 3) Check local git health
+    local_status = git_healthy(PROJECT_DIR)
 
-    pretty_section(f"Cloning repo into {REPO_DIR}")
-    run(["git", "clone", REPO_URL, REPO_DIR])
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    # 4) Checkout requested commit
-    os.chdir(REPO_DIR)
-    run(["git", "fetch", "--all"])
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
+            else:
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
 
-    if sha and sha.lower() != "latest":
-        run(["git", "checkout", sha])
-        pretty_step(f"Checked out SHA (requested): {sha}")
-    else:
-        pretty_step("Using currently checked-out branch (update it manually if needed).")
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+
+    if not local_status:
+        if os.path.isdir(PROJECT_DIR):
+            pretty_step(f"Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+            shutil.rmtree(PROJECT_DIR)
+
+        pretty_section(f"Cloning repo into {PROJECT_DIR}")
+        run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+        # 4) Checkout requested commit
+        os.chdir(PROJECT_DIR)
+        run(["git", "fetch", "--all"])
+
+        if sha and sha.lower() != "latest":
+            run(["git", "checkout", sha])
+            pretty_step(f"Checked out SHA (requested): {sha}")
+        else:
+            pretty_step("Using currently checked-out branch (update it manually if needed).")
 
     if action == "clone_only":
-        pretty_section(f"enviroCar-server repository cloned and checked out at: {REPO_DIR}")
+        pretty_section(f"enviroCar-server repository cloned and checked out at: {PROJECT_DIR}")
         sys.exit()
 
     # 5) Patch mongo.properties and mail.properties
-    patch_mongo_properties(REPO_DIR)
-    patch_mail_properties(REPO_DIR)
+    patch_mongo_properties(PROJECT_DIR)
+    patch_mail_properties(PROJECT_DIR)
 
-    actual = current_sha(REPO_DIR)
+    actual = current_sha(PROJECT_DIR)
     pretty_section(f"Building commit: {actual}")
 
     # 6) Patch pom.xml so legacy repos work

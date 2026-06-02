@@ -31,7 +31,7 @@ import os
 import sys
 from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
 from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
-from defects4rest.src.utils.git import get_default_branch, sha_exists
+from defects4rest.src.utils.git import get_default_branch, sha_exists, git_healthy
 
 REPO_URL = "https://github.com/apilayer/restcountries.git"
 PROJECT_NAME = 'restcountries'
@@ -70,39 +70,65 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     for tool in ("git", "docker"):
         check_prereq(tool)
 
-    # Remove existing repo for clean build
-    if os.path.isdir(PROJECT_DIR):
-        pretty_step(f"Removing existing repo at {PROJECT_DIR} …")
-        safe_rmtree(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR)
 
-    # Clone repository (use fork for specific issue)
-    pretty_subsection("Cloning REST Countries repository …")
-    if issue_id == 235 and sha == "01769a8efaef544ddab2f1f044aa7f7172c8db56":
-        run(["git", "clone", "https://github.com/plokhotnyuk/restcountries.git", PROJECT_DIR])
-    else:
-        run(["git", "clone", REPO_URL, PROJECT_DIR])
+    if not local_status:
+        # Remove existing repo for clean build
+        if os.path.isdir(PROJECT_DIR):
+            pretty_step(f"Removing existing repo at {PROJECT_DIR} …")
+            safe_rmtree(PROJECT_DIR)
 
-    os.chdir(PROJECT_DIR)
+        # Clone repository (use fork for specific issue)
+        pretty_subsection("Cloning REST Countries repository …")
+        if issue_id == 235 and sha == "01769a8efaef544ddab2f1f044aa7f7172c8db56":
+            run(["git", "clone", "https://github.com/plokhotnyuk/restcountries.git", PROJECT_DIR])
+        else:
+            run(["git", "clone", REPO_URL, PROJECT_DIR])
 
-    # Checkout specific SHA or latest
-    try:
-        pretty_step("Checking out specific SHA …")
-        if sha:
-            if sha == "latest":
-                pretty_step("Pulling latest default branch …")
-                run(["git", "fetch", "--all"])
-                default_branch = get_default_branch()
-                pretty_step(f"Using default branch: {default_branch}")
-                run(["git", "checkout", default_branch])
-                run(["git", "pull", "origin", default_branch])
+        os.chdir(PROJECT_DIR)
+
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
             else:
-                if not sha_exists(sha):
-                    pretty_step(f"SHA {sha} not found locally; fetching …")
-                    run(["git", "fetch", "--all", "--tags"])
-                pretty_step(f"Checking out SHA: {sha}")
-                run(["git", "checkout", sha])
-    except subprocess.CalledProcessError as e:
-        sys.exit(1)
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
+
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+
+    if not local_status:
+        try:
+            pretty_step("Checking out specific SHA …")
+            if sha:
+                if sha == "latest":
+                    pretty_step("Pulling latest default branch …")
+                    run(["git", "fetch", "--all"])
+                    default_branch = get_default_branch()
+                    pretty_step(f"Using default branch: {default_branch}")
+                    run(["git", "checkout", default_branch])
+                    run(["git", "pull", "origin", default_branch])
+                else:
+                    if not sha_exists(sha):
+                        pretty_step(f"SHA {sha} not found locally; fetching …")
+                        run(["git", "fetch", "--all", "--tags"])
+                    pretty_step(f"Checking out SHA: {sha}")
+                    run(["git", "checkout", sha])
+        except subprocess.CalledProcessError as e:
+            sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"restcountries repository cloned and checked out at: {PROJECT_DIR}")

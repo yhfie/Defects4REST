@@ -35,9 +35,11 @@ import requests
 import yaml
 from typing import List
 from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
+from defects4rest.src.utils.git import git_healthy
 from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
 from defects4rest.src.api_dep_setup import kafka_rest as kafka_rest_issues
 from defects4rest.src.utils.issue_metadata import run_issue_hook
+
 
 REPO_URL = "https://github.com/confluentinc/kafka-rest.git"
 
@@ -407,27 +409,27 @@ def build_kafka(build_mode, docker_tag: str | None, compose_cmd: None, issue_id,
     if build_mode == "manual":
         pretty_section(f"Building kafka-rest (issue number {issue_id}) manually...")
 
-        actual = current_sha(REPO_DIR)
+        actual = current_sha(PROJECT_DIR)
         pretty_step(f"[main] Building commit: {actual}")
 
         # Generate files and build
-        write_kafka_rest_properties(DOCKER_ROOT)
-        write_dockerfile(DOCKER_ROOT)
-        write_docker_compose(DOCKER_ROOT, None)
+        write_kafka_rest_properties(PROJECT_DIR)
+        write_dockerfile(PROJECT_DIR)
+        write_docker_compose(PROJECT_DIR, None)
 
         pretty_step("\n=== Running docker compose up -d --build ===")
-        run(compose_cmd + ["build", "--no-cache"], cwd=DOCKER_ROOT)
-        run(compose_cmd + ["up", "-d"], cwd=DOCKER_ROOT)
+        run(compose_cmd + ["build", "--no-cache"], cwd=PROJECT_DIR)
+        run(compose_cmd + ["up", "-d"], cwd=PROJECT_DIR)
     else:
         # Image mode
         pretty_section(f"Deploying kafka-rest (issue number {issue_id}) at version: {docker_tag}")
-        os.makedirs(DOCKER_ROOT, exist_ok=True)
+        os.makedirs(PROJECT_DIR, exist_ok=True)
 
-        write_kafka_rest_properties(DOCKER_ROOT)
-        write_docker_compose(DOCKER_ROOT, docker_tag)
+        write_kafka_rest_properties(PROJECT_DIR)
+        write_docker_compose(PROJECT_DIR, docker_tag)
 
         pretty_step("Running docker compose up -d --build")
-        run(compose_cmd + ["up", "-d", "--build"], cwd=DOCKER_ROOT)
+        run(compose_cmd + ["up", "-d", "--build"], cwd=PROJECT_DIR)
 
 def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
     """Main deployment function for Kafka REST."""
@@ -440,26 +442,52 @@ def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
         check_prereq(tool)
     compose_cmd = find_compose_cmd()
 
-    # Remove existing repo
-    if os.path.isdir(REPO_DIR):
-        pretty_step(f"[main] Removing existing repo at {REPO_DIR} for a clean checkout...")
-        shutil.rmtree(REPO_DIR)
+    local_status = git_healthy(PROJECT_DIR)
 
-    # Clone and checkout
-    pretty_step(f"[main] Cloning repo into {REPO_DIR}")
-    run(["git", "clone", REPO_URL, REPO_DIR])
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    pretty_step("[main] Fetching all refs...")
-    run(["git", "fetch", "--all", "--tags"], cwd=REPO_DIR)
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
+            else:
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
 
-    if sha and sha.lower() != "latest":
-        pretty_step(f"[main] Checking out {sha}")
-        run(["git", "checkout", sha], cwd=REPO_DIR)
-    else:
-        pretty_step("[main] Using default branch HEAD")
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+
+    if not local_status:
+        # Remove existing repo
+        if os.path.isdir(PROJECT_DIR):
+            pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+            shutil.rmtree(PROJECT_DIR)
+
+        # Clone and checkout
+        pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
+        run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+        # Note: 'git clone' already fetches, but we fetch tags to be safe
+        run(["git", "fetch", "--tags"], cwd=PROJECT_DIR)
+
+        if sha and sha.lower() != "latest":
+            pretty_step(f"[main] Checking out {sha}")
+            run(["git", "checkout", sha], cwd=PROJECT_DIR)
+        else:
+            pretty_step("[main] Using default branch HEAD")
 
     if action == "clone_only":
-        pretty_section(f"kafka-rest repository cloned and checked out at: {REPO_DIR}")
+        pretty_section(f"kafka-rest repository cloned and checked out at: {PROJECT_DIR}")
         sys.exit()
 
     # Handle SHA lookup
@@ -494,18 +522,18 @@ def stop():
     """Stop Kafka REST stack."""
     pretty_section("Stopping kafka-rest containers …")
     compose_cmd = find_compose_cmd()
-    if not os.path.isdir(DOCKER_ROOT):
-        pretty_step(f"[stop] No DOCKER_ROOT at {DOCKER_ROOT}, nothing to stop.")
+    if not os.path.isdir(PROJECT_DIR):
+        pretty_step(f"[stop] No PROJECT_DIR at {PROJECT_DIR}, nothing to stop.")
         return
-    run(compose_cmd + ["stop"], cwd=DOCKER_ROOT)
+    run(compose_cmd + ["stop"], cwd=PROJECT_DIR)
     pretty_step("[stop] docker compose stop completed.")
 
 def clean():
     """Complete cleanup of Kafka REST deployment."""
     pretty_section("Cleaning kafka-rest containers …")
     compose_cmd = find_compose_cmd()
-    if not os.path.isdir(DOCKER_ROOT):
-        pretty_step(f"[clean] No DOCKER_ROOT at {DOCKER_ROOT}, nothing to clean.")
+    if not os.path.isdir(PROJECT_DIR):
+        pretty_step(f"[clean] No PROJECT_DIR at {PROJECT_DIR}, nothing to clean.")
         return
-    run(compose_cmd + ["down"], cwd=DOCKER_ROOT)
+    run(compose_cmd + ["down"], cwd=PROJECT_DIR)
     pretty_step("[clean] docker compose down completed.")
