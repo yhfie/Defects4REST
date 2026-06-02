@@ -30,7 +30,7 @@ import os
 import sys
 from textwrap import dedent
 from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
-from defects4rest.src.utils.git import sha_exists, get_default_branch
+from defects4rest.src.utils.git import sha_exists, get_default_branch, git_healthy
 from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq
 
 # Repository and file configuration
@@ -534,49 +534,75 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     except FileNotFoundError:
         os.chdir(parent_dir)
 
-    # Clean up existing deployment if compose file exists
-    compose_file = os.path.join(project_dir_abs, "docker-compose.yml")
-    if os.path.exists(compose_file):
-        clean(heading=False)
+    local_status = git_healthy(PROJECT_DIR)
 
-    # Remove existing repo
-    if os.path.isdir(project_dir_abs):
-        pretty_subsection("Removing existing Dolibarr repository …")
-        pretty_step(f"Deleting '{project_dir_abs}' …")
-        shutil.rmtree(project_dir_abs)
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    # Ensure parent directory exists
-    os.makedirs(parent_dir, exist_ok=True)
-
-    # Clone repository
-    pretty_subsection("Cloning Dolibarr repository …")
-    pretty_step(f"Cloning into '{project_dir_abs}' …")
-    run(["git", "clone", REPO_URL, project_dir_abs], cwd=parent_dir)
-
-    # Change to project directory for all subsequent operations
-    os.chdir(PROJECT_DIR)
-
-    try:
-        pretty_subsection("Checking out specific SHA …")
-        if sha:
-            if sha == "latest":
-                # Pull latest from default branch
-                print("Pulling latest default branch …")
-                run(["git", "fetch", "--all"])
-                default_branch = get_default_branch()
-                print(f"Using default branch: {default_branch}")
-                run(["git", "checkout", default_branch])
-                run(["git", "pull", "origin", default_branch])
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
             else:
-                # Check out specific commit
-                if not sha_exists(sha):
-                    print(f"SHA {sha} not found locally; fetching …")
-                    run(["git", "fetch", "--all", "--tags"])
-                print(f"Checking out SHA: {sha}")
-                run(["git", "checkout", sha])
-    except subprocess.CalledProcessError as e:
-        print(f"Checkout failed: {e}", file=sys.stderr)
-        sys.exit(1)
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
+
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+            
+    if not local_status:
+        # Clean up existing deployment if compose file exists
+        compose_file = os.path.join(project_dir_abs, "docker-compose.yml")
+        if os.path.exists(compose_file):
+            clean(heading=False)
+
+        # Remove existing repo
+        if os.path.isdir(project_dir_abs):
+            pretty_subsection("Removing existing Dolibarr repository …")
+            pretty_step(f"Deleting '{project_dir_abs}' …")
+            shutil.rmtree(project_dir_abs)
+
+        # Ensure parent directory exists
+        os.makedirs(parent_dir, exist_ok=True)
+
+        # Clone repository
+        pretty_subsection("Cloning Dolibarr repository …")
+        pretty_step(f"Cloning into '{project_dir_abs}' …")
+        run(["git", "clone", REPO_URL, project_dir_abs], cwd=parent_dir)
+
+        # Change to project directory for all subsequent operations
+        os.chdir(PROJECT_DIR)
+
+        try:
+            pretty_subsection("Checking out specific SHA …")
+            if sha:
+                if sha == "latest":
+                    # Pull latest from default branch
+                    print("Pulling latest default branch …")
+                    run(["git", "fetch", "--all"])
+                    default_branch = get_default_branch()
+                    print(f"Using default branch: {default_branch}")
+                    run(["git", "checkout", default_branch])
+                    run(["git", "pull", "origin", default_branch])
+                else:
+                    # Check out specific commit
+                    if not sha_exists(sha):
+                        print(f"SHA {sha} not found locally; fetching …")
+                        run(["git", "fetch", "--all", "--tags"])
+                    print(f"Checking out SHA: {sha}")
+                    run(["git", "checkout", sha])
+        except subprocess.CalledProcessError as e:
+            print(f"Checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"dolibarr repository cloned and checked out at: {project_dir_abs}")

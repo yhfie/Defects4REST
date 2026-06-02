@@ -30,7 +30,7 @@ import os
 import sys
 from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
 from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq
-from defects4rest.src.utils.git import get_default_branch, sha_exists
+from defects4rest.src.utils.git import get_default_branch, sha_exists, git_healthy
 from defects4rest.src.utils.issue_metadata import run_issue_hook
 from defects4rest.src.api_dep_setup import seaweedfs as seaweedfs_issues
 
@@ -61,41 +61,68 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     for tool in ("git", "docker", "docker-compose", "wget"):
         check_prereq(tool)
 
-    # Remove existing repo for clean deployment
-    if os.path.isdir(PROJECT_DIR):
-        pretty_step(f"Removing existing repo at {PROJECT_DIR} …")
-        shutil.rmtree(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR)
 
-    os.makedirs(os.path.dirname(PROJECT_DIR), exist_ok=True)
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    # Clone repository
-    pretty_step(f"Cloning SeaweedFS into {PROJECT_DIR} …")
-    run(["git", "clone", REPO_URL, PROJECT_DIR])
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
+            else:
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
 
-    os.chdir(PROJECT_DIR)
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
 
-    # Verify SHA exists
-    if not sha_exists(sha) and sha != "latest":
-        pretty_step(f"SHA {sha} not found.")
-        sys.exit(1)
+    if not local_status:
 
-    # Checkout specific SHA or latest
-    try:
-        if sha == "latest":
-            run(["git", "fetch", "--all"])
-            default_branch = get_default_branch()
-            run(["git", "checkout", default_branch])
-            run(["git", "pull", "origin", default_branch])
-        elif sha:
-            run(["git", "fetch", "--all", "--tags"])
-            run(["git", "checkout", sha])
-        else:
-            run(["git", "fetch", "--all"])
-            run(["git", "checkout", "main"])
-            run(["git", "pull", "origin", "main"])
-    except subprocess.CalledProcessError as e:
-        print(f"Git checkout failed: {e}", file=sys.stderr)
-        sys.exit(1)
+        # Remove existing repo for clean deployment
+        if os.path.isdir(PROJECT_DIR):
+            pretty_step(f"Removing existing repo at {PROJECT_DIR} …")
+            shutil.rmtree(PROJECT_DIR)
+
+        os.makedirs(os.path.dirname(PROJECT_DIR), exist_ok=True)
+
+        # Clone repository
+        pretty_step(f"Cloning SeaweedFS into {PROJECT_DIR} …")
+        run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+        os.chdir(PROJECT_DIR)
+
+        # Verify SHA exists
+        if not sha_exists(sha) and sha != "latest":
+            pretty_step(f"SHA {sha} not found.")
+            sys.exit(1)
+
+        # Checkout specific SHA or latest
+        try:
+            if sha == "latest":
+                run(["git", "fetch", "--all"])
+                default_branch = get_default_branch()
+                run(["git", "checkout", default_branch])
+                run(["git", "pull", "origin", default_branch])
+            elif sha:
+                run(["git", "fetch", "--all", "--tags"])
+                run(["git", "checkout", sha])
+            else:
+                run(["git", "fetch", "--all"])
+                run(["git", "checkout", "main"])
+                run(["git", "pull", "origin", "main"])
+        except subprocess.CalledProcessError as e:
+            print(f"Git checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"seaweedfs repository cloned and checked out at: {PROJECT_DIR}")

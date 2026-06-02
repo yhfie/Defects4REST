@@ -419,35 +419,60 @@ def wait_for_awx():
     return False
 
 def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
-    # Clone AWX repo
-    # Remove existing repo
-    if os.path.isdir(PROJECT_DIR):
-        pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
-        shutil.rmtree(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR)
 
-    # Clone and checkout
-    pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
-    run(["git", "clone", REPO_URL, PROJECT_DIR])
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    pretty_step("[main] Fetching all refs...")
-    run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
+            else:
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
 
-    if sha and sha.lower() != "latest":
-        pretty_step(f"[main] Checking out {sha}")
-        run(["git", "checkout", sha], cwd=PROJECT_DIR)
-    else:
-        pretty_step("[main] Using default branch HEAD")
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
 
-    # Handle SHA lookup
-    if sha == "latest":
-        docker_tag = "latest"
-    else:
-        docker_tag = resolve_docker_tag_from_csv(sha, CSV_PATH)
+    if not local_status:
+        # Clone AWX repo
+        # Remove existing repo
+        if os.path.isdir(PROJECT_DIR):
+            pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+            shutil.rmtree(PROJECT_DIR)
 
-    if action == "clone_only":
-        pretty_section(f"awx repository cloned and checked out at: {PROJECT_DIR}")
-        sys.exit()
+        # Clone and checkout
+        pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
+        run(["git", "clone", REPO_URL, PROJECT_DIR])
 
+        pretty_step("[main] Fetching all refs...")
+        run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+
+        if sha and sha.lower() != "latest":
+            pretty_step(f"[main] Checking out {sha}")
+            run(["git", "checkout", sha], cwd=PROJECT_DIR)
+        else:
+            pretty_step("[main] Using default branch HEAD")
+
+        # Handle SHA lookup
+        if sha == "latest":
+            docker_tag = "latest"
+        else:
+            docker_tag = resolve_docker_tag_from_csv(sha, CSV_PATH)
+
+        if action == "clone_only":
+            pretty_section(f"awx repository cloned and checked out at: {PROJECT_DIR}")
+            sys.exit()
 
     pretty_section(f"Deploying awx (issue number {issue_id}) at version: {docker_tag}")
 

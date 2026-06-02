@@ -27,7 +27,7 @@ import requests
 from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
 from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
 from defects4rest.src.utils.issue_metadata import run_issue_hook, _load_bug_row ,resolve_docker_version_for_sha
-from defects4rest.src.utils.git import sha_exists, get_default_branch
+from defects4rest.src.utils.git import sha_exists, get_default_branch, git_healthy
 from defects4rest.src.api_dep_setup import mastodon as mastodon_isuue
 
 # Default Mastodon repo
@@ -229,83 +229,106 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     if sha in PATCHED_SHAS:
         print(f"[INFO] Using patched fork for SHA {sha}: {repo_url}")
 
-    # Clone repo if not exists
-    # if not os.path.isdir(PROJECT_DIR):
-    #     print(f"[INFO] Cloning Mastodon into '{PROJECT_DIR}' …")
-    #     run(["git", "clone", repo_url, PROJECT_DIR])
-    if os.path.isdir(PROJECT_DIR):
-        print(f"[INFO] Deleting existing folder: {PROJECT_DIR}")
-        shutil.rmtree(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR)
 
-    print(f"[INFO] Cloning Mastodon into '{PROJECT_DIR}' …")
-    run(["git", "clone", repo_url, PROJECT_DIR])
-    os.chdir(PROJECT_DIR)
-    print("[INFO] Resetting local changes from previous deployments …")
-    try:
-        run(["git", "reset", "--hard"])
-        run(["git", "clean", "-fd"])
-    except subprocess.CalledProcessError as e:
-        print(f"[WARN] Could not reset local changes: {e}")
-
-    # Add fork remote if SHA is patched
-    if sha in PATCHED_SHAS:
-        fork_url = PATCHED_SHAS[sha]
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
         try:
-            run(["git", "remote", "add", "patched_fork", fork_url])
-            print(f"[INFO] Added remote 'patched_fork' -> {fork_url}")
-        except subprocess.CalledProcessError:
-            # Remote probably already exists, safe to ignore
-            print(f"[INFO] Remote 'patched_fork' already exists")
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    # Fetch all branches and tags
-    print("[INFO] Fetching all remotes …")
-    run(["git", "fetch", "--all", "--tags"])
-
-    # Reset any local changes from previous deployments
-
-
-    # Check SHA existence
-    # Check SHA existence (with better fallback logic)
-    if sha and sha != "latest" and not sha_exists(sha):
-        # 1) First try fetching the SHA directly (works for dangling commits if server allows it)
-        primary_remote = "patched_fork" if sha in PATCHED_SHAS else "origin"
-        print(f"[INFO] SHA {sha} not found locally. Trying direct fetch from {primary_remote} …")
-        try:
-            run(["git", "fetch", primary_remote, sha])
-        except subprocess.CalledProcessError as e:
-            print(f"[WARN] Direct fetch from {primary_remote} failed: {e}")
-
-        # 2) If still missing and it's a patched SHA, then fetch all branches from fork (your existing behavior)
-        if not sha_exists(sha) and sha in PATCHED_SHAS:
-            print(f"[INFO] SHA {sha} still missing. Fetching all branches from patched fork …")
-            run(["git", "fetch", "patched_fork", "+refs/heads/*:refs/remotes/patched_fork/*"])
-            # (optional) also fetch tags from fork
-            run(["git", "fetch", "patched_fork", "--tags"])
-
-        # 3) Final check
-        if not sha_exists(sha):
-            print(f"[ERROR] SHA {sha} still not found after all fetch attempts. Aborting.")
-            print("[HINT] The SHA may not exist in this fork, or GitHub may not serve it unless reachable from a ref.")
-            sys.exit(1)
-
-    # Checkout SHA or branch
-    try:
-        if sha:
-            if sha == "latest":
-                default_branch = get_default_branch()
-                pretty_step(f"Checking out latest default branch: {default_branch}")
-                run(["git", "checkout", default_branch])
-                run(["git", "pull", "origin", default_branch])
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
             else:
-                pretty_step(f"Checking out SHA: {sha}")
-                run(["git", "checkout", sha])
-        else:
-            pretty_step("No SHA provided. Pulling latest 'main' branch …")
-            run(["git", "checkout", "main"])
-            run(["git", "pull", "origin", "main"])
-    except subprocess.CalledProcessError as e:
-        print(f"[ERROR] Checkout failed: {e}", file=sys.stderr)
-        sys.exit(1)
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
+
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+    
+    if not local_status:
+        # Clone repo if not exists
+        if os.path.isdir(PROJECT_DIR):
+            print(f"[INFO] Deleting existing folder: {PROJECT_DIR}")
+            shutil.rmtree(PROJECT_DIR)
+
+        print(f"[INFO] Cloning Mastodon into '{PROJECT_DIR}' …")
+        run(["git", "clone", repo_url, PROJECT_DIR])
+        os.chdir(PROJECT_DIR)
+        print("[INFO] Resetting local changes from previous deployments …")
+        try:
+            run(["git", "reset", "--hard"])
+            run(["git", "clean", "-fd"])
+        except subprocess.CalledProcessError as e:
+            print(f"[WARN] Could not reset local changes: {e}")
+
+        # Add fork remote if SHA is patched
+        if sha in PATCHED_SHAS:
+            fork_url = PATCHED_SHAS[sha]
+            try:
+                run(["git", "remote", "add", "patched_fork", fork_url])
+                print(f"[INFO] Added remote 'patched_fork' -> {fork_url}")
+            except subprocess.CalledProcessError:
+                # Remote probably already exists, safe to ignore
+                print(f"[INFO] Remote 'patched_fork' already exists")
+
+        # Fetch all branches and tags
+        print("[INFO] Fetching all remotes …")
+        run(["git", "fetch", "--all", "--tags"])
+
+        # Reset any local changes from previous deployments
+
+
+        # Check SHA existence
+        # Check SHA existence (with better fallback logic)
+        if sha and sha != "latest" and not sha_exists(sha):
+            # 1) First try fetching the SHA directly (works for dangling commits if server allows it)
+            primary_remote = "patched_fork" if sha in PATCHED_SHAS else "origin"
+            print(f"[INFO] SHA {sha} not found locally. Trying direct fetch from {primary_remote} …")
+            try:
+                run(["git", "fetch", primary_remote, sha])
+            except subprocess.CalledProcessError as e:
+                print(f"[WARN] Direct fetch from {primary_remote} failed: {e}")
+
+            # 2) If still missing and it's a patched SHA, then fetch all branches from fork (your existing behavior)
+            if not sha_exists(sha) and sha in PATCHED_SHAS:
+                print(f"[INFO] SHA {sha} still missing. Fetching all branches from patched fork …")
+                run(["git", "fetch", "patched_fork", "+refs/heads/*:refs/remotes/patched_fork/*"])
+                # (optional) also fetch tags from fork
+                run(["git", "fetch", "patched_fork", "--tags"])
+
+            # 3) Final check
+            if not sha_exists(sha):
+                print(f"[ERROR] SHA {sha} still not found after all fetch attempts. Aborting.")
+                print("[HINT] The SHA may not exist in this fork, or GitHub may not serve it unless reachable from a ref.")
+                sys.exit(1)
+
+        # Checkout SHA or branch
+        try:
+            if sha:
+                if sha == "latest":
+                    default_branch = get_default_branch()
+                    pretty_step(f"Checking out latest default branch: {default_branch}")
+                    run(["git", "checkout", default_branch])
+                    run(["git", "pull", "origin", default_branch])
+                else:
+                    pretty_step(f"Checking out SHA: {sha}")
+                    run(["git", "checkout", sha])
+            else:
+                pretty_step("No SHA provided. Pulling latest 'main' branch …")
+                run(["git", "checkout", "main"])
+                run(["git", "pull", "origin", "main"])
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"mastodon repository cloned and checked out at: {PROJECT_DIR}")

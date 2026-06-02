@@ -38,6 +38,7 @@ from defects4rest.src.utils.shell import run, pretty_step, pretty_section, prett
 from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
 from defects4rest.src.utils.issue_metadata import run_issue_hook, _load_bug_row ,resolve_docker_version_for_sha
 from defects4rest.src.api_dep_setup import nocodb as nocodb_issues
+from defects4rest.src.utils.git import git_healthy
 
 # Configuration
 PROJECT_NAME = 'nocodb'
@@ -154,23 +155,49 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     else:
         pretty_section(f"Cloning and checkout NocoDB (issue number {issue_id}) at SHA: {sha}")
 
-    # Remove existing repo
-    if os.path.isdir(PROJECT_DIR):
-        pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
-        shutil.rmtree(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR)
 
-    # Clone and checkout
-    pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
-    run(["git", "clone", REPO_URL, PROJECT_DIR])
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-    pretty_step("[main] Fetching all refs...")
-    run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
+            else:
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=PROJECT_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
 
-    if sha and sha.lower() != "latest":
-        pretty_step(f"[main] Checking out {sha}")
-        run(["git", "checkout", sha], cwd=PROJECT_DIR)
-    else:
-        pretty_step("[main] Using default branch HEAD")
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+
+    if not local_status:
+        # Remove existing repo
+        if os.path.isdir(PROJECT_DIR):
+            pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+            shutil.rmtree(PROJECT_DIR)
+
+        # Clone and checkout
+        pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
+        run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+        pretty_step("[main] Fetching all refs...")
+        run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+
+        if sha and sha.lower() != "latest":
+            pretty_step(f"[main] Checking out {sha}")
+            run(["git", "checkout", sha], cwd=PROJECT_DIR)
+        else:
+            pretty_step("[main] Using default branch HEAD")
 
     if action == "clone_only":
         pretty_section(f"nocodb repository cloned and checked out at: {PROJECT_DIR}")

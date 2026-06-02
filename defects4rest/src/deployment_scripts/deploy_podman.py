@@ -22,9 +22,10 @@
 import os
 import subprocess
 import sys
+import shutil
 
 from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
-from defects4rest.src.utils.git import get_default_branch
+from defects4rest.src.utils.git import get_default_branch, git_healthy
 from defects4rest.src.utils.resources import ensure_temp_project_dir
 
 REPO_URL = "https://github.com/containers/podman.git"
@@ -68,10 +69,35 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     ensure_go_version()
 
     # Clone or update repository
-    if os.path.isdir(os.path.join(CLONE_DIR, '.git')):
-        pretty_step(f"Repo exists—fetching updates in {CLONE_DIR}")
-        run(["git", "-C", CLONE_DIR, "fetch", "--all", "--tags"])
-    else:
+    local_status = git_healthy(CLONE_DIR)
+
+    if local_status:
+        pretty_step(f"[main] Local repo healthy at {CLONE_DIR}. Updating...")
+        try:
+            run(["git", "fetch", "--all", "--tags"], cwd=CLONE_DIR)
+
+            if sha and sha.lower() != "latest":
+                pretty_step(f"[main] Checking out {sha}...")
+                run(["git", "checkout", "--force", sha], cwd=CLONE_DIR)
+            else:
+                remote_info = subprocess.check_output(
+                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                    cwd=CLONE_DIR, text=True
+                ).strip()
+                default_branch = remote_info.split('/')[-1]
+
+                pretty_step(f"[main] Resetting to latest {default_branch}...")
+                run(["git", "checkout", "--force", default_branch], cwd=CLONE_DIR)
+                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=CLONE_DIR)
+        
+        except Exception as e:
+            pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
+            local_status = False # Trigger the 'else' block below
+
+    if not local_status:
+        if os.path.isdir(CLONE_DIR):
+            pretty_step(f"[main] Removing existing repo at {CLONE_DIR} for a clean checkout...")
+            shutil.rmtree(CLONE_DIR)
         pretty_step(f"Cloning Podman into {CLONE_DIR}…")
         run(["git", "clone", REPO_URL, CLONE_DIR])
 
