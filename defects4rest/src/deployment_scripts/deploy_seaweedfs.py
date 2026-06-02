@@ -1,4 +1,4 @@
-# -------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Copyright (c) 2026 Rahil Piyush Mehta, Kausar Y. Moshood, Huwaida Rahman Yafie and Manish Motwani
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -17,38 +17,30 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-# -------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 
 """
 SeaweedFS Deployment Script
 
 Deploys SeaweedFS distributed file system using Docker Compose.Clones the repository, checks out specific SHA, and launches the service.
 """
-
-import os
-import shutil
 import subprocess
+import shutil
+import os
 import sys
-
-from defects4rest.src.api_dep_setup import seaweedfs as seaweedfs_issues
+from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
+from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq
 from defects4rest.src.utils.git import get_default_branch, sha_exists
 from defects4rest.src.utils.issue_metadata import run_issue_hook
-from defects4rest.src.utils.resources import check_prereq, ensure_temp_project_dir
-from defects4rest.src.utils.shell import (
-    pretty_section,
-    pretty_step,
-    pretty_subsection,
-    run,
-)
+from defects4rest.src.api_dep_setup import seaweedfs as seaweedfs_issues
 
 REPO_URL = "https://github.com/seaweedfs/seaweedfs.git"
-PROJECT_NAME = "seaweedfs"
-PROJECT_DIR = str(ensure_temp_project_dir(PROJECT_NAME))
+PROJECT_NAME = 'seaweedfs'
+PROJECT_DIR =  str(ensure_temp_project_dir(PROJECT_NAME))
 COMPOSE_FILE = "seaweedfs-compose.yml"
 COMPOSE_URL = f"https://raw.githubusercontent.com/seaweedfs/seaweedfs/master/docker/{COMPOSE_FILE}"
 PROJECT_SUBDIR = "docker"
 COMPOSE_PROJECT_NAME = "seaweedfs"
-
 
 def ensure_compose_file():
     """Download docker-compose file if not present."""
@@ -58,59 +50,52 @@ def ensure_compose_file():
         run(["wget", "-q", "-O", compose_path, COMPOSE_URL])
     return compose_path
 
-
 def main(sha=None, issue_id=None, action: str = "deploy"):
     """Main deployment function for SeaweedFS."""
     # Verify prerequisites
     if action == "deploy":
         pretty_section(f"Deploying SeaweedFS (issue number {issue_id}) at SHA: {sha}")
     else:
-        pretty_section(
-            f"Cloning and checkout SeaweedFS (issue number {issue_id}) at SHA: {sha}"
-        )
+        pretty_section(f"Cloning and checkout SeaweedFS (issue number {issue_id}) at SHA: {sha}")
 
     for tool in ("git", "docker", "docker-compose", "wget"):
         check_prereq(tool)
 
     # Remove existing repo for clean deployment
     if os.path.isdir(PROJECT_DIR):
-        # pretty_step(f"Removing existing repo at {PROJECT_DIR} …")
-        # shutil.rmtree(PROJECT_DIR)
-        pretty_step(f"repo exists at {PROJECT_DIR}. Checking out …")
-        os.chdir(PROJECT_DIR)
-        run(["git", "fetch", "--all", "--tags"])
-        run(["git", "checkout", sha])
-    else:
-        os.makedirs(os.path.dirname(PROJECT_DIR), exist_ok=True)
+        pretty_step(f"Removing existing repo at {PROJECT_DIR} …")
+        shutil.rmtree(PROJECT_DIR)
 
-        # Clone repository
-        pretty_step(f"Cloning SeaweedFS into {PROJECT_DIR} …")
-        run(["git", "clone", REPO_URL, PROJECT_DIR])
+    os.makedirs(os.path.dirname(PROJECT_DIR), exist_ok=True)
 
-        os.chdir(PROJECT_DIR)
+    # Clone repository
+    pretty_step(f"Cloning SeaweedFS into {PROJECT_DIR} …")
+    run(["git", "clone", REPO_URL, PROJECT_DIR])
 
-        # Verify SHA exists
-        if not sha_exists(sha) and sha != "latest":
-            pretty_step(f"SHA {sha} not found.")
-            sys.exit(1)
+    os.chdir(PROJECT_DIR)
 
-        # Checkout specific SHA or latest
-        try:
-            if sha == "latest":
-                run(["git", "fetch", "--all"])
-                default_branch = get_default_branch()
-                run(["git", "checkout", default_branch])
-                run(["git", "pull", "origin", default_branch])
-            elif sha:
-                run(["git", "fetch", "--all", "--tags"])
-                run(["git", "checkout", sha])
-            else:
-                run(["git", "fetch", "--all"])
-                run(["git", "checkout", "main"])
-                run(["git", "pull", "origin", "main"])
-        except subprocess.CalledProcessError as e:
-            print(f"Git checkout failed: {e}", file=sys.stderr)
-            sys.exit(1)
+    # Verify SHA exists
+    if not sha_exists(sha) and sha != "latest":
+        pretty_step(f"SHA {sha} not found.")
+        sys.exit(1)
+
+    # Checkout specific SHA or latest
+    try:
+        if sha == "latest":
+            run(["git", "fetch", "--all"])
+            default_branch = get_default_branch()
+            run(["git", "checkout", default_branch])
+            run(["git", "pull", "origin", default_branch])
+        elif sha:
+            run(["git", "fetch", "--all", "--tags"])
+            run(["git", "checkout", sha])
+        else:
+            run(["git", "fetch", "--all"])
+            run(["git", "checkout", "main"])
+            run(["git", "pull", "origin", "main"])
+    except subprocess.CalledProcessError as e:
+        print(f"Git checkout failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if action == "clone_only":
         pretty_section(f"seaweedfs repository cloned and checked out at: {PROJECT_DIR}")
@@ -120,27 +105,23 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
 
     # Launch SeaweedFS with Docker Compose
     pretty_subsection("\nLaunching SeaweedFS with Docker Compose …")
-    run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_path,
-            "-p",
-            COMPOSE_PROJECT_NAME,
-            "up",
-            "-d",
-        ],
-        cwd=PROJECT_DIR,
-    )
+    run([
+        "docker", "compose",
+        "-f", compose_path,
+        "-p", COMPOSE_PROJECT_NAME,
+        "up", "-d"
+    ], cwd=PROJECT_DIR)
 
-    pretty_section("SeaweedFS is up", color="green")
+    pretty_section("SeaweedFS is up",color="green")
     print(" Master UI ➜ http://localhost:9333/")
 
     # Run issue-specific setup hooks
     if issue_id:
         pretty_step("\nRunning pre-requisites for defect…")
-        args = {"s3_url": "http://localhost:8333", "issue_id": issue_id}
+        args = {
+            "s3_url": "http://localhost:8333",
+            "issue_id": issue_id
+        }
 
         info = run_issue_hook(issue_id, args, issues_module=seaweedfs_issues)
         presigned_url = info.get("url") if info else None
@@ -148,7 +129,6 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
             pretty_step(f"\n Pre-requisites completed. Presigned URL: {presigned_url}")
         else:
             pretty_step("\n Pre-requisites completed, but no presigned URL returned.")
-
 
 def stop():
     """Stop SeaweedFS containers."""
@@ -158,22 +138,15 @@ def stop():
         if not os.path.isfile(compose_path):
             print("Compose file missing.")
             return
-        run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                compose_path,
-                "-p",
-                COMPOSE_PROJECT_NAME,
-                "stop",
-            ],
-            cwd=PROJECT_DIR,
-        )
+        run([
+            "docker", "compose",
+            "-f", compose_path,
+            "-p", COMPOSE_PROJECT_NAME,
+            "stop"
+        ], cwd=PROJECT_DIR)
         pretty_step("Containers stopped.")
     else:
         pretty_step("Project directory not found.")
-
 
 def clean():
     """Clean up SeaweedFS containers and volumes."""
@@ -188,20 +161,14 @@ def clean():
         return
 
     try:
-        run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                compose_path,
-                "-p",
-                COMPOSE_PROJECT_NAME,
-                "down",
-                "--remove-orphans",
-                "--volumes",
-            ],
-            cwd=PROJECT_DIR,
-        )
+        run([
+            "docker", "compose",
+            "-f", compose_path,
+            "-p", COMPOSE_PROJECT_NAME,
+            "down",
+            "--remove-orphans",
+            "--volumes"
+        ], cwd=PROJECT_DIR)
         pretty_step("Cleanup complete.")
     except subprocess.CalledProcessError as e:
         pretty_step(f"Cleanup failed: {e}", file=sys.stderr)

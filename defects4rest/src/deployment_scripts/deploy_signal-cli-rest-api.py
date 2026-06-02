@@ -1,4 +1,4 @@
-# -------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Copyright (c) 2026 Rahil Piyush Mehta, Kausar Y. Moshood, Huwaida Rahman Yafie and Manish Motwani
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -17,7 +17,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-# -------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 
 """
 Signal CLI REST API Deployment Script
@@ -26,7 +26,6 @@ Deploys signal-cli-rest-api using Docker containers with versions determined by 
 """
 
 from __future__ import annotations
-
 import argparse
 import csv
 import os
@@ -35,17 +34,12 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
+from defects4rest.src.utils.shell import run, pretty_step, pretty_section
+from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
 from defects4rest.src.utils.issue_metadata import _load_bug_row
-from defects4rest.src.utils.resources import (
-    check_prereq,
-    data_csv,
-    ensure_temp_project_dir,
-)
-from defects4rest.src.utils.shell import pretty_section, pretty_step, run
 
-PROJECT_NAME = "signal-cli-rest-api"
-PROJECT_DIR = str(ensure_temp_project_dir(PROJECT_NAME))
+PROJECT_NAME = 'signal-cli-rest-api'
+PROJECT_DIR =  str(ensure_temp_project_dir(PROJECT_NAME))
 CSV_PATH = data_csv(PROJECT_NAME)
 REPO_URL = "https://github.com/bbernhard/signal-cli-rest-api.git"
 
@@ -57,18 +51,15 @@ DEFAULT_CONFIG = os.path.expanduser("~/.local/share/signal-cli")
 DEFAULT_IMAGE_REPO = "bbernhard/signal-cli-rest-api"
 NAME_PREFIX = "signal-cli-bug"
 
-
 def check_prereq(bin_name: str):
     """Verify required binary is available."""
     if not shutil.which(bin_name):
         print(f"ERROR: required binary '{bin_name}' not found in PATH")
         sys.exit(2)
 
-
 @dataclass
 class BugRow:
     """Container for bug metadata from CSV."""
-
     bug_id: int
     buggy_sha: str | None
     patch_sha: str | None
@@ -85,7 +76,6 @@ class BugRow:
         """Calculate default port for patched variant (81XX)."""
         return int(f"81{self.bug_id:02d}")
 
-
 REQUIRED_COLUMNS = {
     "bug_id",
     "buggy_sha",
@@ -93,7 +83,6 @@ REQUIRED_COLUMNS = {
     "buggy_docker_version",
     "patched_docker_version",
 }
-
 
 def _load_bug_row(csv_path: str, sha: str | None) -> "BugRow":
     """Load bug metadata from CSV based on SHA."""
@@ -111,14 +100,12 @@ def _load_bug_row(csv_path: str, sha: str | None) -> "BugRow":
     reader = csv.DictReader(data.splitlines(), dialect=dialect)
     rows = []
     for r in reader:
-        rr = {(k or "").lower(): (v or "").strip() for k, v in r.items()}
+        rr = { (k or "").lower(): (v or "").strip() for k, v in r.items() }
         if rr:
             rows.append(rr)
 
     if not sha:
-        print(
-            "ERROR: sha is required to resolve the CSV row when calling _load_bug_row(csv_path, sha)"
-        )
+        print("ERROR: sha is required to resolve the CSV row when calling _load_bug_row(csv_path, sha)")
         sys.exit(2)
 
     chosen = None
@@ -155,7 +142,6 @@ def _load_bug_row(csv_path: str, sha: str | None) -> "BugRow":
         patched_docker_version=(chosen.get("patched_docker_version") or None),
     )
 
-
 def _decide_variant(row: BugRow, sha: str | None, prefer: str | None) -> str:
     """Determine whether to deploy buggy or patched variant."""
     if prefer in {"buggy", "patched"}:
@@ -166,7 +152,6 @@ def _decide_variant(row: BugRow, sha: str | None, prefer: str | None) -> str:
         return "patched"
     return "patched" if row.patched_docker_version else "buggy"
 
-
 def _image_for(row: BugRow, variant: str) -> str:
     """Get full Docker image name for variant."""
     tag = row.buggy_docker_version if variant == "buggy" else row.patched_docker_version
@@ -175,81 +160,54 @@ def _image_for(row: BugRow, variant: str) -> str:
         sys.exit(2)
     return f"{DEFAULT_IMAGE_REPO}:{tag}"
 
-
 def _default_port(row: BugRow, variant: str, override_port: str | None) -> int:
     """Determine port to bind container to."""
     if override_port:
         return int(override_port)
     return row.default_buggy_port if variant == "buggy" else row.default_patched_port
 
-
 def _container_name(row: BugRow, variant: str) -> str:
     """Generate unique container name."""
     return f"{NAME_PREFIX}{row.bug_id}-{variant}"
 
-
-def main(
-    sha=None,
-    issue_id=None,
-    action: str = "deploy",
-    port: str = DEFAULT_PORT,
-    mode: str = DEFAULT_MODE,
-    config_dir: str = DEFAULT_CONFIG,
-    detach: bool = False,
-    *,
-    bug_id: int | None = None,
-    variant: str | None = None,
-):
+def main(sha = None,issue_id=None, action: str = "deploy", port: str = DEFAULT_PORT,mode: str = DEFAULT_MODE,config_dir: str = DEFAULT_CONFIG,detach: bool = False, *,bug_id: int | None = None,variant: str | None = None):
     if action == "deploy":
-        pretty_section(
-            f"Deploying signal-cli-rest-api (issue number {issue_id}) at SHA: {sha}"
-        )
+        pretty_section(f"Deploying signal-cli-rest-api (issue number {issue_id}) at SHA: {sha}")
     else:
-        pretty_section(
-            f"Cloning and checkout signal-cli-rest-api (issue number {issue_id}) at SHA: {sha}"
-        )
+        pretty_section(f"Cloning and checkout signal-cli-rest-api (issue number {issue_id}) at SHA: {sha}")
     # Remove existing repo
-    if os.path.isdir(PROJECT_DIR) and os.path.exists(f"{PROJECT_DIR}/.git"):
-        # pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
-        # shutil.rmtree(PROJECT_DIR)
-        pretty_step(f"repo exists at {PROJECT_DIR}. Checking out …")
-        os.chdir(PROJECT_DIR)
-        run(["git", "fetch", "--all", "--tags"])
-        run(["git", "checkout", sha])
+    if os.path.isdir(PROJECT_DIR):
+        pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+        shutil.rmtree(PROJECT_DIR)
+
+    # Clone and checkout
+    pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
+    run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+    pretty_step("[main] Fetching all refs...")
+    run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+
+    if sha and sha.lower() != "latest":
+        pretty_step(f"[main] Checking out {sha}")
+        run(["git", "checkout", sha], cwd=PROJECT_DIR)
     else:
-        # Clone and checkout
-        pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
-        run(["git", "clone", REPO_URL, PROJECT_DIR])
-
-        pretty_step("[main] Fetching all refs...")
-        run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
-
-        if sha and sha.lower() != "latest":
-            pretty_step(f"[main] Checking out {sha}")
-            run(["git", "checkout", sha], cwd=PROJECT_DIR)
-        else:
-            pretty_step("[main] Using default branch HEAD")
+        pretty_step("[main] Using default branch HEAD")
 
     if action == "clone_only":
-        pretty_section(
-            f"signal-cli-rest-api repository cloned and checked out at: {PROJECT_DIR}"
-        )
+        pretty_section(f"signal-cli-rest-api repository cloned and checked out at: {PROJECT_DIR}")
         sys.exit()
 
+
     """Main deployment function for signal-cli-rest-api."""
-    pretty_section(
-        f"Deploying signal-cli-rest-api (isuue number {issue_id}) at SHA: {sha}"
-    )
+    pretty_section(f"Deploying signal-cli-rest-api (isuue number {issue_id}) at SHA: {sha}")
     check_prereq("docker")
 
     # Load bug metadata and determine configuration
     row = _load_bug_row(CSV_PATH, sha)
-    bug_id = row.bug_id
+    bug_id =row.bug_id
     chosen = _decide_variant(row, sha, variant)
     image = _image_for(row, chosen)
-    bind_port = _default_port(
-        row, chosen, port if port != DEFAULT_PORT or bug_id is None else None
-    )
+    bind_port = _default_port(row, chosen, port if port != DEFAULT_PORT or bug_id is None else None)
 
     # Ensure config directory exists
     cfg = Path(os.path.expanduser(config_dir))
@@ -261,31 +219,17 @@ def main(
     run(["docker", "pull", image])
 
     # Remove existing container if present
-    run(
-        [
-            "bash",
-            "-lc",
-            f"if docker ps -a --format '{{{{.Names}}}}' | grep -qx {shlex.quote(name)}; then docker rm -f {shlex.quote(name)}; fi",
-        ]
-    )  # nosec
+    run(["bash", "-lc", f"if docker ps -a --format '{{{{.Names}}}}' | grep -qx {shlex.quote(name)}; then docker rm -f {shlex.quote(name)}; fi"])  # nosec
 
     # Launch container
     cmd = [
-        "docker",
-        "run",
-        "-d",
-        "--name",
-        name,
-        "-p",
-        f"{bind_port}:8080",
-        "-e",
-        f"MODE={mode}",
-        "-e",
-        "SIGNAL_CLI_CONFIG_DIR=/home/.local/share/signal-cli",
-        "-v",
-        f"{cfg}:/home/.local/share/signal-cli",
-        "--restart",
-        "unless-stopped",
+        "docker", "run", "-d",
+        "--name", name,
+        "-p", f"{bind_port}:8080",
+        "-e", f"MODE={mode}",
+        "-e", "SIGNAL_CLI_CONFIG_DIR=/home/.local/share/signal-cli",
+        "-v", f"{cfg}:/home/.local/share/signal-cli",
+        "--restart", "unless-stopped",
         image,
     ]
     run(cmd)
@@ -297,11 +241,8 @@ def main(
     print(f"Image       : {image}")
     print(f"Mode        : {mode}")
     print(f"Config mount: {cfg} → /home/.local/share/signal-cli")
-    print(
-        f"API URL     : http://localhost:{bind_port}/v1/qrcodelink?device_name=signal-api"
-    )
+    print(f"API URL     : http://localhost:{bind_port}/v1/qrcodelink?device_name=signal-api")
     print("----------------------------------------\n")
-
 
 def stop():
     """Stop all signal-cli-rest-api bug containers."""
@@ -317,7 +258,6 @@ done
 """
     run(["bash", "-lc", script])  # nosec
     pretty_step("Stopped.")
-
 
 def clean():
     """Clean up signal-cli-rest-api deployment."""

@@ -421,32 +421,28 @@ def wait_for_awx():
 def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
     # Clone AWX repo
     # Remove existing repo
-    if os.path.isdir(PROJECT_DIR) and os.path.exists(f"{PROJECT_DIR}/.git"):
-        # pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
-        # shutil.rmtree(PROJECT_DIR)
-        pretty_step(f"repo exists at {PROJECT_DIR}. Checking out …")
-        os.chdir(PROJECT_DIR)
-        run(["git", "fetch", "--all", "--tags"])
-        run(["git", "checkout", sha])
+    if os.path.isdir(PROJECT_DIR):
+        pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+        shutil.rmtree(PROJECT_DIR)
+
+    # Clone and checkout
+    pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
+    run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+    pretty_step("[main] Fetching all refs...")
+    run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+
+    if sha and sha.lower() != "latest":
+        pretty_step(f"[main] Checking out {sha}")
+        run(["git", "checkout", sha], cwd=PROJECT_DIR)
     else:
-        # Clone and checkout
-        pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
-        run(["git", "clone", REPO_URL, PROJECT_DIR])
+        pretty_step("[main] Using default branch HEAD")
 
-        pretty_step("[main] Fetching all refs...")
-        run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
-
-        if sha and sha.lower() != "latest":
-            pretty_step(f"[main] Checking out {sha}")
-            run(["git", "checkout", sha], cwd=PROJECT_DIR)
-        else:
-            pretty_step("[main] Using default branch HEAD")
-
-        # Handle SHA lookup
-        if sha == "latest":
-            docker_tag = "latest"
-        else:
-            docker_tag = resolve_docker_tag_from_csv(sha, CSV_PATH)
+    # Handle SHA lookup
+    if sha == "latest":
+        docker_tag = "latest"
+    else:
+        docker_tag = resolve_docker_tag_from_csv(sha, CSV_PATH)
 
     if action == "clone_only":
         pretty_section(f"awx repository cloned and checked out at: {PROJECT_DIR}")

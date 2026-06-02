@@ -1,4 +1,4 @@
-# -------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Copyright (c) 2026 Rahil Piyush Mehta, Kausar Y. Moshood, Huwaida Rahman Yafie and Manish Motwani
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -17,7 +17,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-# -------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 
 """
 NocoDB Deployment Script
@@ -25,40 +25,24 @@ NocoDB Deployment Script
 Deploys NocoDB using Docker containers with versions determined by SHA lookups in a CSV file.
 Uses SQLite with persistent volume for data storage.
 """
-
-import csv
-import os
-import re
-import shutil
-import socket
 import subprocess
+import shutil
+import os
 import sys
+import socket
+import csv
+import re
 import time
-
 import requests
-
+from defects4rest.src.utils.shell import run, pretty_step, pretty_section, pretty_subsection
+from defects4rest.src.utils.resources import ensure_temp_project_dir, check_prereq, data_csv
+from defects4rest.src.utils.issue_metadata import run_issue_hook, _load_bug_row ,resolve_docker_version_for_sha
 from defects4rest.src.api_dep_setup import nocodb as nocodb_issues
-from defects4rest.src.utils.issue_metadata import (
-    _load_bug_row,
-    resolve_docker_version_for_sha,
-    run_issue_hook,
-)
-from defects4rest.src.utils.resources import (
-    check_prereq,
-    data_csv,
-    ensure_temp_project_dir,
-)
-from defects4rest.src.utils.shell import (
-    pretty_section,
-    pretty_step,
-    pretty_subsection,
-    run,
-)
 
 # Configuration
-PROJECT_NAME = "nocodb"
+PROJECT_NAME = 'nocodb'
 REPO_URL = "https://github.com/nocodb/nocodb.git"
-PROJECT_DIR = str(ensure_temp_project_dir(PROJECT_NAME))
+PROJECT_DIR =  str(ensure_temp_project_dir(PROJECT_NAME))
 DATA_DIR = PROJECT_DIR
 CSV_PATH = data_csv(PROJECT_NAME)
 
@@ -67,7 +51,6 @@ CONTAINER_NAME = "nocodb"
 START_PORT = 8080
 CONTAINER_PORT = "8080"
 
-
 # Helper functions
 def find_free_port(start=START_PORT):
     """Find available port starting from given port."""
@@ -75,14 +58,12 @@ def find_free_port(start=START_PORT):
     while True:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(("", port))
+                s.bind(('', port))
                 return port
             except OSError:
                 port += 1
 
-
 _SPLIT_SHA_RE = re.compile(r"[,\|\s;]+")
-
 
 def _tokenize_shas(value: str) -> list[str]:
     """Split string containing multiple SHAs separated by delimiters."""
@@ -90,9 +71,7 @@ def _tokenize_shas(value: str) -> list[str]:
         return []
     return [tok.strip() for tok in _SPLIT_SHA_RE.split(value) if tok.strip()]
 
-
 _HEX_SHA_RE = re.compile(r"\b[0-9a-fA-F]{7,40}\b")
-
 
 def _extract_shas_from_text(text: str) -> list[str]:
     """Extract SHA-like tokens from arbitrary text."""
@@ -100,27 +79,21 @@ def _extract_shas_from_text(text: str) -> list[str]:
         return []
     return list({m.group(0) for m in _HEX_SHA_RE.finditer(text)})
 
-
 def resolve_docker_tag_from_csv(sha: str, csv_path: str) -> str:
     """Determine Docker image tag based on SHA lookup in CSV."""
     if not os.path.isfile(csv_path):
         print(csv_path)
         raise FileNotFoundError(f"CSV not found at {csv_path}")
 
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         required = {
-            "buggy_sha",
-            "patch_sha",
-            "patched_files",
-            "buggy_docker_version",
-            "patched_docker_version",
+            "buggy_sha", "patch_sha", "patched_files",
+            "buggy_docker_version", "patched_docker_version"
         }
         missing_cols = required - set(reader.fieldnames or [])
         if missing_cols:
-            raise ValueError(
-                f"CSV missing required columns: {', '.join(sorted(missing_cols))}"
-            )
+            raise ValueError(f"CSV missing required columns: {', '.join(sorted(missing_cols))}")
 
         for row in reader:
             buggy_sha = (row.get("buggy_sha") or "").strip()
@@ -157,11 +130,8 @@ def resolve_docker_tag_from_csv(sha: str, csv_path: str) -> str:
                             )
                         return tag
 
-    raise ValueError(
-        f"SHA {sha} not found in CSV (neither in patch_sha nor buggy_sha, "
-        f"and not inferred from patched_files)."
-    )
-
+    raise ValueError(f"SHA {sha} not found in CSV (neither in patch_sha nor buggy_sha, "
+                     f"and not inferred from patched_files).")
 
 def wait_for_server(url, timeout=60):
     """Poll URL until server responds or timeout."""
@@ -177,37 +147,30 @@ def wait_for_server(url, timeout=60):
     print("Timeout waiting for server.")
     return False
 
-
 def main(sha=None, issue_id=None, action: str = "deploy"):
     """Main deployment function for NocoDB."""
     if action == "deploy":
         pretty_section(f"Deploying NocoDB (issue number {issue_id}) at SHA: {sha}")
     else:
-        pretty_section(
-            f"Cloning and checkout NocoDB (issue number {issue_id}) at SHA: {sha}"
-        )
+        pretty_section(f"Cloning and checkout NocoDB (issue number {issue_id}) at SHA: {sha}")
 
     # Remove existing repo
-    if os.path.isdir(PROJECT_DIR) and os.path.exists(f"{PROJECT_DIR}/.git"):
-        # pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
-        # shutil.rmtree(PROJECT_DIR)
-        pretty_step(f"repo exists at {PROJECT_DIR}. Checking out …")
-        os.chdir(PROJECT_DIR)
-        run(["git", "fetch", "--all", "--tags"])
-        run(["git", "checkout", sha])
+    if os.path.isdir(PROJECT_DIR):
+        pretty_step(f"[main] Removing existing repo at {PROJECT_DIR} for a clean checkout...")
+        shutil.rmtree(PROJECT_DIR)
+
+    # Clone and checkout
+    pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
+    run(["git", "clone", REPO_URL, PROJECT_DIR])
+
+    pretty_step("[main] Fetching all refs...")
+    run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+
+    if sha and sha.lower() != "latest":
+        pretty_step(f"[main] Checking out {sha}")
+        run(["git", "checkout", sha], cwd=PROJECT_DIR)
     else:
-        # Clone and checkout
-        pretty_step(f"[main] Cloning repo into {PROJECT_DIR}")
-        run(["git", "clone", REPO_URL, PROJECT_DIR])
-
-        pretty_step("[main] Fetching all refs...")
-        run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
-
-        if sha and sha.lower() != "latest":
-            pretty_step(f"[main] Checking out {sha}")
-            run(["git", "checkout", sha], cwd=PROJECT_DIR)
-        else:
-            pretty_step("[main] Using default branch HEAD")
+        pretty_step("[main] Using default branch HEAD")
 
     if action == "clone_only":
         pretty_section(f"nocodb repository cloned and checked out at: {PROJECT_DIR}")
@@ -216,7 +179,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     check_prereq("docker")
 
     if not sha:
-        pretty_step("Error: please provide a sha (or 'latest').", color="red")
+        pretty_step("Error: please provide a sha (or 'latest').",color="red")
         sys.exit(1)
 
     # Determine Docker tag from SHA
@@ -237,18 +200,14 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
 
     # Remove existing container
     pretty_subsection("Stopping existing container …")
-    subprocess.run(
-        ["docker", "rm", "-f", CONTAINER_NAME],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Pull Docker image
     pretty_subsection(f"\nPulling image {image_ref} …")
     try:
         run(["docker", "pull", image_ref])
     except subprocess.CalledProcessError as e:
-        pretty_step(f"docker pull failed: {e}", color="red")
+        pretty_step(f"docker pull failed: {e}",color="red")
         sys.exit(1)
 
     # Find available port
@@ -258,20 +217,13 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
 
     # Run container with persistent volume
     pretty_section(f"\nRunning NocoDB at http://localhost:{host_port}/dashboard …")
-    run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            CONTAINER_NAME,
-            "-v",
-            f"{DATA_DIR}:/usr/app/data/",
-            "-p",
-            f"{host_port}:{CONTAINER_PORT}",
-            image_ref,
-        ]
-    )
+    run([
+        "docker", "run", "-d",
+        "--name", CONTAINER_NAME,
+        "-v", f"{DATA_DIR}:/usr/app/data/",
+        "-p", f"{host_port}:{CONTAINER_PORT}",
+        image_ref
+    ])
 
     # Wait for server to be ready
     wait_for_server(f"http://localhost:{host_port}/dashboard")
@@ -283,17 +235,15 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         "issue_id": issue_id,
         "project": "nocodb",
         "extra_flag": True,
-        "port": host_port,
+        "port": host_port
     }
-    run_issue_hook(issue_id, args, issues_module=nocodb_issues)
-
+    run_issue_hook(issue_id, args, issues_module = nocodb_issues)
 
 def stop():
     """Stop NocoDB container."""
     pretty_section("Stopping NocoDB container …")
     subprocess.run(["docker", "stop", CONTAINER_NAME], check=False)
     pretty_step("Container stopped.")
-
 
 def clean():
     """Clean up NocoDB container and data directory."""

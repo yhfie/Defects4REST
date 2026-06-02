@@ -23,6 +23,7 @@
 Git utility functions for checking commits and branches.
 """
 import subprocess
+import os
 
 def sha_exists(sha):
     """
@@ -48,3 +49,31 @@ def get_default_branch():
                 return line.split(":")[-1].strip()
     except subprocess.CalledProcessError:
         return "master"
+    
+def git_healthy(directory):
+    """
+    Get the status of local git health (true/false).
+    Checks if the directory is a git repo and if the object database is valid.
+    """
+    if not os.path.isdir(directory):
+        return False
+
+    try:
+        subprocess.run(
+            ["git", "-C", directory, "rev-parse", "--is-inside-work-tree"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+
+        subprocess.run(
+            ["git", "-C", directory, "fsck", "--no-dangling"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+
+        return True
+
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
