@@ -420,6 +420,7 @@ def wait_for_awx():
 
 def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
     local_status = git_healthy(PROJECT_DIR)
+    print(local_status)
 
     if local_status:
         pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
@@ -464,15 +465,15 @@ def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
         else:
             pretty_step("[main] Using default branch HEAD")
 
-        # Handle SHA lookup
-        if sha == "latest":
-            docker_tag = "latest"
-        else:
-            docker_tag = resolve_docker_tag_from_csv(sha, CSV_PATH)
+    # Handle SHA lookup
+    if sha == "latest":
+        docker_tag = "latest"
+    else:
+        docker_tag = resolve_docker_tag_from_csv(sha, CSV_PATH)
 
-        if action == "clone_only":
-            pretty_section(f"awx repository cloned and checked out at: {PROJECT_DIR}")
-            sys.exit()
+    if action == "clone_only":
+        pretty_section(f"awx repository cloned and checked out at: {PROJECT_DIR}")
+        sys.exit()
 
     pretty_section(f"Deploying awx (issue number {issue_id}) at version: {docker_tag}")
 

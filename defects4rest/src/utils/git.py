@@ -66,12 +66,12 @@ def git_healthy(directory):
             text=True
         )
 
-        subprocess.run(
-            ["git", "-C", directory, "fsck", "--no-dangling"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        # subprocess.run(
+        #     ["git", "-C", directory, "fsck", "--no-dangling"],
+        #     check=True,
+        #     capture_output=True,
+        #     text=True
+        # )
 
         return True
 

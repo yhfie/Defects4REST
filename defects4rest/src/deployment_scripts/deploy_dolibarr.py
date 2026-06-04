@@ -521,7 +521,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         check_prereq(tool)
 
     compose = get_compose_cmd()
-    print(PROJECT_DIR)
+    print("[PROJECT_DIR]: ", PROJECT_DIR)
 
     project_dir_abs = os.path.abspath(PROJECT_DIR)
     parent_dir = os.path.dirname(project_dir_abs)
@@ -534,26 +534,36 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     except FileNotFoundError:
         os.chdir(parent_dir)
 
+    print("checking git health...")
     local_status = git_healthy(PROJECT_DIR)
+    print(local_status)
 
     if local_status:
         pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
         try:
+            pretty_subsection("Checking out specific SHA …")
             run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
 
-            if sha and sha.lower() != "latest":
-                pretty_step(f"[main] Checking out {sha}...")
-                run(["git", "checkout", "--force", sha], cwd=PROJECT_DIR)
-            else:
-                remote_info = subprocess.check_output(
-                    ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
-                    cwd=PROJECT_DIR, text=True
-                ).strip()
-                default_branch = remote_info.split('/')[-1]
-
-                pretty_step(f"[main] Resetting to latest {default_branch}...")
-                run(["git", "checkout", "--force", default_branch], cwd=PROJECT_DIR)
-                run(["git", "reset", "--hard", f"origin/{default_branch}"], cwd=PROJECT_DIR)
+            if sha:
+                if sha == "latest":
+                    # Pull latest from default branch
+                    print("Pulling latest default branch …")
+                    run(["git", "fetch", "--all"])
+                    default_branch = get_default_branch()
+                    print(f"Using default branch: {default_branch}")
+                    run(["git", "checkout", default_branch])
+                    run(["git", "pull", "origin", default_branch])
+                else:
+                    # Check out specific commit
+                    # if not sha_exists(sha):
+                    #     print(f"SHA {sha} not found locally; fetching …")
+                    #     run(["git", "fetch", "--all", "--tags"])
+                    print(f"Checking out SHA: {sha}")
+                    print("[PROJECT_DIR]: ", PROJECT_DIR)
+                    run(["git", "checkout", sha], cwd=PROJECT_DIR)
+        except subprocess.CalledProcessError as e:
+            print(f"Checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
         
         except Exception as e:
             pretty_step(f"[main] Failed to update existing repo: {e}. Falling back to clean clone...")
