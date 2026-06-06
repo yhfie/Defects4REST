@@ -40,7 +40,7 @@ ENV_TARGET = ".env.production"
 PATCHED_SHAS = {
     "e964cdcec3fb17351b4b5c93e96662da2b2d249b": "https://github.com/ClearlyClaire/mastodon.git",
     "adf76a6aa357720348f51aa8d2c06dcd6469a728": "https://github.com/ClearlyClaire/mastodon.git",
-
+    "46b6270a1692a403a6d92502d4e16735c745b41e": "https://github.com/ClearlyClaire/mastodon.git",
     # Add more patched SHAs here
 }
 

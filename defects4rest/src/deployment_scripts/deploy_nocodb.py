@@ -161,6 +161,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
         try:
             run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+            run(["git", "fetch", "origin", sha], cwd=PROJECT_DIR)
 
             if sha and sha.lower() != "latest":
                 pretty_step(f"[main] Checking out {sha}...")
@@ -192,6 +193,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
 
         pretty_step("[main] Fetching all refs...")
         run(["git", "fetch", "--all", "--tags"], cwd=PROJECT_DIR)
+        run(["git", "fetch", "origin", sha], cwd=PROJECT_DIR)
 
         if sha and sha.lower() != "latest":
             pretty_step(f"[main] Checking out {sha}")
