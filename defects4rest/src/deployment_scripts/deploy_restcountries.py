@@ -70,7 +70,9 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     for tool in ("git", "docker"):
         check_prereq(tool)
 
-    local_status = git_healthy(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR) and os.path.isdir(PROJECT_DIR) and len(os.listdir(PROJECT_DIR)) != 0
+
+    print("[local_status] = ", local_status)
 
     if not local_status:
         # Remove existing repo for clean build

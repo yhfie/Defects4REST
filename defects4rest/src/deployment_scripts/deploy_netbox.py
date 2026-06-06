@@ -208,7 +208,7 @@ def main(sha=None, issue_id=None, action: str = "deploy", port=DEFAULT_PORT, ski
     else:
         pretty_section(f"Cloning and checkout Netbox (issue number {issue_id}) at SHA: {sha}")
 
-    local_status = git_healthy(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR) and os.path.isdir(PROJECT_DIR) and len(os.listdir(PROJECT_DIR)) != 0
 
     if local_status:
         pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")

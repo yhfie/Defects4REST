@@ -69,7 +69,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     ensure_go_version()
 
     # Clone or update repository
-    local_status = git_healthy(CLONE_DIR)
+    local_status = git_healthy(CLONE_DIR) and os.path.isdir(CLONE_DIR) and len(os.listdir(CLONE_DIR)) != 0
 
     if local_status:
         pretty_step(f"[main] Local repo healthy at {CLONE_DIR}. Updating...")
@@ -101,24 +101,24 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
         pretty_step(f"Cloning Podman into {CLONE_DIR}…")
         run(["git", "clone", REPO_URL, CLONE_DIR])
 
-    os.chdir(CLONE_DIR)
+        os.chdir(CLONE_DIR)
 
-    # Checkout the requested SHA / branch
-    try:
-        if sha == "latest":
-            default_branch = get_default_branch(CLONE_DIR)
-            pretty_step(f"'latest' requested—checking out default branch '{default_branch}'")
-            run(["git", "checkout", default_branch])
-            run(["git", "pull", "origin", default_branch])
-        elif sha:
-            pretty_step(f"Checking out '{sha}'…")
-            run(["git", "checkout", sha])
-        else:
-            pretty_step("No SHA provided—defaulting to 'main'")
-            run(["git", "checkout", "main"])
-            run(["git", "pull", "origin", "main"])
-    except subprocess.CalledProcessError as e:
-        sys.exit(f"Git checkout failed: {e}")
+        # Checkout the requested SHA / branch
+        try:
+            if sha == "latest":
+                default_branch = get_default_branch(CLONE_DIR)
+                pretty_step(f"'latest' requested—checking out default branch '{default_branch}'")
+                run(["git", "checkout", default_branch])
+                run(["git", "pull", "origin", default_branch])
+            elif sha:
+                pretty_step(f"Checking out '{sha}'…")
+                run(["git", "checkout", sha])
+            else:
+                pretty_step("No SHA provided—defaulting to 'main'")
+                run(["git", "checkout", "main"])
+                run(["git", "pull", "origin", "main"])
+        except subprocess.CalledProcessError as e:
+            sys.exit(f"Git checkout failed: {e}")
 
     if action == "clone_only":
         pretty_section(f"podman repository cloned and checked out at: {CLONE_DIR}")

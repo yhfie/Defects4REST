@@ -419,7 +419,7 @@ def wait_for_awx():
     return False
 
 def main(sha: str = "latest", issue_id=None, action: str = "deploy"):
-    local_status = git_healthy(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR) and os.path.isdir(PROJECT_DIR) and len(os.listdir(PROJECT_DIR)) != 0
     print(local_status)
 
     if local_status:

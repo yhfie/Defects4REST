@@ -229,7 +229,7 @@ def main(sha=None, issue_id=None, action: str = "deploy"):
     if sha in PATCHED_SHAS:
         print(f"[INFO] Using patched fork for SHA {sha}: {repo_url}")
 
-    local_status = git_healthy(PROJECT_DIR)
+    local_status = git_healthy(PROJECT_DIR) and os.path.isdir(PROJECT_DIR) and len(os.listdir(PROJECT_DIR)) != 0
 
     if local_status:
         pretty_step(f"[main] Local repo healthy at {PROJECT_DIR}. Updating...")
