@@ -87,11 +87,13 @@ def run(project_name, issue_id):
     # Display the list of patched files if available
     if "patched_files" in row and pd.notna(row["patched_files"]):
         print("\nPatched Files")
+        num = 1
         # Split multiple file paths by " | " delimiter
         for f in str(row["patched_files"]).split(" | "):
             f = f.strip()
             if f:
-                print("- " + f)
+                print(f"{num}. " + f)
+            num += 1
 
     # Display the types of files that were patched
     if "patched_file_types" in row and pd.notna(row["patched_file_types"]):
